@@ -1,4 +1,4 @@
-#include "encrypt.h"
+#include "FreiaEncryption.h"
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/kdf.h>
@@ -6,7 +6,7 @@
 #include <cstring>
 
 
-std::string base64_encode(const std::string& in)
+std::string FreiaEncryption::base64_encode(const std::string& in)
 {
     std::string out;
     size_t i = 0;
@@ -25,7 +25,7 @@ std::string base64_encode(const std::string& in)
     return out;
 }
 
-std::string base64_decode(const std::string& in)
+std::string FreiaEncryption::base64_decode(const std::string& in)
 {
     std::vector<unsigned char> out;
     size_t i = 0;
@@ -44,9 +44,9 @@ std::string base64_decode(const std::string& in)
     return std::string(out.begin(), out.end());
 }
 
-std::string encryptData(const std::string& data, const std::string& password) {
-    unsigned char key[32];
-    PKCS5_PBKDF2_HMAC(password.c_str(), password.size(), nullptr, 0, 100000, EVP_sha256(), 32, key);
+std::string FreiaEncryption::encryptData(const std::string& data, const Key& key) {
+    // unsigned char key[32];
+    // PKCS5_PBKDF2_HMAC(password.c_str(), password.size(), nullptr, 0, 100000, EVP_sha256(), 32, key);
 
     unsigned char iv[16];
     if (RAND_bytes(iv, 16) != 1) return "";
@@ -54,7 +54,7 @@ std::string encryptData(const std::string& data, const std::string& password) {
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (!ctx) return "";
 
-    if (!EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key, iv)) {
+    if (!EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key.data(), iv)) {
         EVP_CIPHER_CTX_free(ctx);
         return "";
     }
@@ -82,16 +82,16 @@ std::string encryptData(const std::string& data, const std::string& password) {
     return result;
 }
 
-std::string decryptData(const std::string& data, const std::string& password) {
+std::string FreiaEncryption::decryptData(const std::string& data, const Key& key) {
     if (data.size() < 16) return "";
     std::string iv_str = data.substr(0, 16);
     std::string ciphertext = data.substr(16);
 
-    unsigned char key[32];
-    PKCS5_PBKDF2_HMAC(password.c_str(), password.size(), nullptr, 0, 100000, EVP_sha256(), 32, key);
+    // unsigned char key[32];
+    // PKCS5_PBKDF2_HMAC(password.c_str(), password.size(), nullptr, 0, 100000, EVP_sha256(), 32, key);
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key, (unsigned char*)iv_str.c_str())) {
+    if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key.data(), (unsigned char*)iv_str.c_str())) {
         EVP_CIPHER_CTX_free(ctx);
         return "";
     }
@@ -114,4 +114,19 @@ std::string decryptData(const std::string& data, const std::string& password) {
     plaintext.resize(plaintext_len);
 
     return std::string(plaintext.begin(), plaintext.end());
+}
+
+FreiaEncryption::Key FreiaEncryption::deriveKey(const std::string& password)
+{
+    Key key{};
+    if (!PKCS5_PBKDF2_HMAC(
+            password.c_str(),
+            password.size(),
+            nullptr, 0,
+            100000,
+            EVP_sha256(),
+            key.size(),
+            key.data()))
+    {}
+    return key;
 }

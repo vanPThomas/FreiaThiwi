@@ -1,54 +1,39 @@
+#include <iostream>
 #include <string>
-#include <sstream>
 #include "server.h"
-#include "encrypt.h"
-
-
-void packageTest();
 
 int main()
 {
     std::cout << "Freia Thiwi v" << PROJECT_VERSION << "\n";
 
-    int maxClients;
     int PORT;
+    int maxClients;
+    std::string serverPassword;
 
-    std::cout << "Enter Port: ";
+    std::cout << "Enter Port (1024–65535): ";
     std::cin >> PORT;
+    if (PORT < 1024 || PORT > 65535) {
+        std::cerr << "Invalid port\n";
+        return 1;
+    }
+
     std::cout << "Maximum number of clients: ";
     std::cin >> maxClients;
+    if (maxClients <= 0) {
+        std::cerr << "Invalid max clients\n";
+        return 1;
+    }
 
-    Server server(PORT, maxClients);
+    std::cin.ignore();  // clear newline
+    std::cout << "Server Password: ";
+    std::getline(std::cin, serverPassword);
+    if (serverPassword.empty()) {
+        std::cerr << "Password cannot be empty\n";
+        return 1;
+    }
+
+    Server server(PORT, maxClients, serverPassword);
     server.run();
-    
+
     return 0;
-}
-
-void packageTest()
-{
-    // package test section
-    std::string test = "for something epic!";
-    std::string password = "test2";
-    std::string password2 = "yippee!";
-
-    std::string encryptedData = encryptData(test, password);
-
-    std::string encryptedDataB64 = base64_encode(encryptedData);  // You must implement this
-
-    std::string innerPackage = "PROT1\n" + encryptedDataB64;
-    std::string fullPackage = encryptData(innerPackage, password2);
-
-    std::string package = decryptData(fullPackage, password2);
-    std::istringstream ss(package);
-    std::string protocol;
-    std::string encryptedMessageB64;
-
-    std::getline(ss, protocol);           // "PROT1"
-    std::getline(ss, encryptedMessageB64); // Full base64 string (no \n inside)
-
-    std::string encryptedMessage = base64_decode(encryptedMessageB64);
-    std::string plaintext = decryptData(encryptedMessage, password);
-
-    std::cout << plaintext << "\n";
-
 }

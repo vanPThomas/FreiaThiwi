@@ -10,11 +10,12 @@
 #include <sys/types.h>
 #include <vector>
 #include <sstream>
-#include "encrypt.h"
+#include <string>
+#include "FreiaEncryption.h"
 
 class Server {
 public:
-    Server(int port, int maxClients);
+    Server(int port, int maxClients, const std::string& password);
     void run();
 
 private:
@@ -25,11 +26,14 @@ private:
     void waitForServerActivity();
     void connectNewClientSocket();
     void handleClientActivity();
+    std::vector<std::string> splitByNewline(const std::string& s);
 
 
     int maxClients;
     int PORT;
-    std::vector<int> clientSocket;   // was int clientSocket[maxClients];
+    FreiaEncryption::Key serverKey;
+    std::string serverPassword;
+    std::vector<int> clientSocket;
     int newSocket = -1;
     int valread = 0;
     int sd = -1;

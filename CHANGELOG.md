@@ -1,3 +1,8 @@
+
+## [v0.2.0] - 2025-11-18
+### added
+- Added protocol recognition
+
 ## [v0.1.4] - 2025-11-18
 ### added
 - Added package length for complete package transfer.

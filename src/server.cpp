@@ -18,6 +18,7 @@ void Server::handleSystemCallError(std::string errorMsg)
 
 int Server::initializeServerSocket() 
 {
+    std::lock_guard<std::mutex> lock(socketMutex);
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSocket == -1) handleSystemCallError("Failed to create socket");
 
@@ -48,26 +49,27 @@ void Server::closeClientSocket(int index)
 
 void Server::collectActiveClientSockets()
 {
+    std::lock_guard<std::mutex> lock(socketMutex);
     for (int i = 0; i < maxClients; i++)
     {
-        sd = clientSocket[i];
+        currentSocket = clientSocket[i];
 
         // if valid socket, add to set
-        if (sd > 0)
-            FD_SET(sd, &readfds);
+        if (currentSocket > 0)
+            FD_SET(currentSocket, &readfds);
         // highest file descriptor number, needed for select func
-        if (sd > max_sd)
-            max_sd = sd;
+        if (currentSocket > max_socket)
+            max_socket = currentSocket;
     }
 }
 
 void Server::waitForServerActivity()
 {
     // wait indeffinitely for socket activity (timeout is NULL)
-    activity = select(max_sd + 1, &readfds, NULL, NULL, NULL);
+    activity = select(max_socket + 1, &readfds, NULL, NULL, NULL);
     if ((activity < 0) && (errno != EINTR))
     {
-        std::cout << "Select error\n";
+        handleSystemCallError("Select error\n");
     }
 }
 
@@ -77,9 +79,10 @@ void Server::connectNewClientSocket()
     {
         newSocket = accept(masterSocket, (struct sockaddr *)&address, (socklen_t *)&addrlen);
         std::cout << "New connection , socket fd is " << newSocket << " , ip is " << inet_ntoa(address.sin_addr) << " , port : " << ntohs(address.sin_port) << "\n";
-
+        
         for (int i = 0; i < maxClients; i++)
         {
+            std::lock_guard<std::mutex> lock(socketMutex);
             if (clientSocket[i] == 0)
             {
                 clientSocket[i] = newSocket;
@@ -94,35 +97,35 @@ void Server::handleClientActivity()
 {
     for (int i = 0; i < maxClients; i++)
     {
-        sd = clientSocket[i];
-        if (sd == 0 || !FD_ISSET(sd, &readfds))
+        std::lock_guard<std::mutex> lock(socketMutex);
+        currentSocket = clientSocket[i];
+        if (currentSocket == 0 || !FD_ISSET(currentSocket, &readfds))
             continue;
 
-        uint32_t netLen = 0;
-        int r = recv(sd, &netLen, sizeof(netLen), MSG_WAITALL);
+        uint32_t packetLengthNet = 0;
+        int r = recv(currentSocket, &packetLengthNet, sizeof(packetLengthNet), MSG_WAITALL);
         if (r <= 0)
         {
-            getpeername(sd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
+            getpeername(currentSocket, (struct sockaddr*)&address, (socklen_t*)&addrlen);
             std::cout << "Host disconnected! ip: " << inet_ntoa(address.sin_addr)
                       << " port: " << ntohs(address.sin_port) << "\n";
             closeClientSocket(i);
             continue;
         }
 
-        uint32_t len = ntohl(netLen);
-        if (len == 0 || len > bufferSize)
+        uint32_t packetLength = ntohl(packetLengthNet);
+        if (packetLength == 0 || packetLength > MAX_PACKET_SIZE)
         {
-            std::cout << "[Warning] Invalid length: " << len << "\n";
-            closeClientSocket(i);
+            std::string errWarning = "[Warning] Invalid length: " + packetLength + std::string("\n");
+            disconnectClient(i, errWarning);
             continue;
         }
 
-        std::string encrypted(len, '\0');
-        r = recv(sd, encrypted.data(), len, MSG_WAITALL);
+        std::string encrypted(packetLength, '\0');
+        r = recv(currentSocket, encrypted.data(), packetLength, MSG_WAITALL);
         if (r <= 0)
         {
-            std::cout << "[Error] Failed to read payload\n";
-            closeClientSocket(i);
+            disconnectClient(i, "[Error] Failed to read payload\n");
             continue;
         }
 
@@ -130,8 +133,7 @@ void Server::handleClientActivity()
         std::string plaintext = FreiaEncryption::decryptData(encrypted, serverKey);
         if (plaintext.empty())
         {
-            std::cout << "[Auth fail] Decryption failed - likely wrong server password\n";
-            closeClientSocket(i);
+            disconnectClient(i, "[Auth fail] Decryption failed - likely wrong server password\n");
             continue;
         }
 
@@ -143,14 +145,17 @@ void Server::handleClientActivity()
         }
         else
         {
-            std::cout << "[Protocol error] Malformed or missing Protocol1\n";
+            // std::cout << "[Protocol error] Malformed or missing Protocol1\n";
+            handleSystemCallError("[Protocol error] Malformed or missing Protocol1\n");
         }
     }
 }
 
 void Server::processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext)
 {
-    int sd = clientSocket[clientIndex];
+    std::cout << "test\n";
+
+    int currentSocket = clientSocket[clientIndex];
 
     auto parts = splitByNewline(plaintext);
 
@@ -159,15 +164,15 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
     try {
         innerLen = std::stoul(parts[2]);
     } catch (...) {
-        std::cout << "[Protocol error] Invalid length field\n";
-        closeClientSocket(clientIndex);
+        disconnectClient(clientIndex, "[Protocol error] Invalid length field\n");
         return;
     }
-
+    
     if (innerLen == 0 || innerLen > plaintext.size())
     {
-        std::cout << "[Protocol error] Inner length out of range\n";
+        handleSystemCallError("[Protocol error] Inner length out of range\n");
         closeClientSocket(clientIndex);
+
         return;
     }
 
@@ -178,27 +183,27 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
               << innerLen << " bytes\n";
 
     // Forward the original encrypted packet to all other clients
-    uint32_t netLen = htonl(encrypted.size());  // original encrypted length
+    uint32_t packetLengthNet = htonl(encrypted.size());  // original encrypted length
     for (int j = 0; j < maxClients; ++j)
     {
-        int sdTarget = clientSocket[j];
-        if (sdTarget != 0 && sdTarget != sd)
+        int socketTarget = clientSocket[j];
+        if (socketTarget != 0 && socketTarget != currentSocket)
         {
-            ssize_t s1 = send(sdTarget, &netLen, sizeof(netLen), 0);
-            ssize_t s2 = send(sdTarget, encrypted.data(), encrypted.size(), 0);
 
-            if (s1 != sizeof(netLen) || s2 != static_cast<ssize_t>(encrypted.size()))
+            ssize_t s1 = send(socketTarget, &packetLengthNet, sizeof(packetLengthNet), 0);
+            ssize_t s2 = send(socketTarget, encrypted.data(), encrypted.size(), 0);
+
+            if (s1 != sizeof(packetLengthNet) || s2 != static_cast<ssize_t>(encrypted.size()))
             {
-                std::cout << "[Warning] Failed to forward to socket " << sdTarget << "\n";
+                std::string errWarning = "[Warning] Failed to forward to socket " + socketTarget + std::string("\n");
+                handleSystemCallError(errWarning);
             }
             else
             {
-                std::cout << "[Forwarded] " << encrypted.size() << " bytes to socket " << sdTarget << "\n";
+                std::cout << "[Forwarded] " << encrypted.size() << " bytes to socket " << socketTarget << "\n";
             }
         }
     }
-
-    // TODO later: store username -> sd mapping
 }
 
 void Server::run()
@@ -210,7 +215,7 @@ void Server::run()
 
         // add mastersocket to socket set
         FD_SET(masterSocket, &readfds);
-        max_sd = masterSocket;
+        max_socket = masterSocket;
         
         collectActiveClientSockets();
         waitForServerActivity();
@@ -219,7 +224,8 @@ void Server::run()
     }
 }
 
-std::vector<std::string> Server::splitByNewline(const std::string& s) {
+std::vector<std::string> Server::splitByNewline(const std::string& s)
+{
     std::vector<std::string> lines;
     std::string line;
     std::istringstream iss(s);
@@ -229,4 +235,12 @@ std::vector<std::string> Server::splitByNewline(const std::string& s) {
         }
     }
     return lines;
+}
+
+void Server::disconnectClient(int index, const std::string& reason)
+{
+    getpeername(clientSocket[index], (struct sockaddr*)&address, (socklen_t*)&addrlen);
+    std::cerr << "Client disconnected (" << reason << "): "
+              << inet_ntoa(address.sin_addr) << ":" << ntohs(address.sin_port) << "\n";
+    closeClientSocket(index);
 }

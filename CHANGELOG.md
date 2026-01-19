@@ -1,3 +1,10 @@
+## [v0.2.2] - 2026-01-20
+### Changed
+- server.cpp: Added mutex to lock delicate code to avoid undefined behavior
+- server.cpp: More consistent error handling
+- server.cpp: Improved disconnect logic
+- server.cpp: improved variable naming
+
 ## [v0.2.1] - 2026-01-19
 ### Changed
 - server.cpp: refectored for cleared protocol handling

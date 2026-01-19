@@ -1,11 +1,12 @@
 #include <iostream>
 #include <string>
 #include "server.h"
+#include "FreiaEncryption.h"
 
 int main()
 {
     std::cout << "Freia Thiwi v" << PROJECT_VERSION << "\n";
-
+    
     int PORT;
     int maxClients;
     std::string serverPassword;

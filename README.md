@@ -89,17 +89,20 @@ cd <repo>
 mkdir build && cd build
 cmake ..
 cmake --build . -j$(nproc)
-./freia-thiwi-client
+./freia-thiwi
 
 ## Build Dependencies
 
 ### Debian / Ubuntu / Lubuntu
 sudo apt update
-sudo apt install build-essential cmake git libglfw3-dev libgl1-mesa-dev libssl-dev
+sudo apt install build-essential cmake git libssl-dev
 
 ### Arch
 sudo pacman -Syu
-sudo pacman -S base-devel cmake git glfw-wayland
+sudo pacman -S base-devel cmake git openssl
+
+#Fedora
+sudo dnf install gcc-c++ cmake git openssl-devel make
 
 (Adjust GLFW package if using X11.)
 

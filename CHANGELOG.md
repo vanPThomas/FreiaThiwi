@@ -1,5 +1,8 @@
+## [v0.2.1] - 2026-01-19
+### Changed
+- server.cpp: refectored for cleared protocol handling
 
-## [v0.2.0] - 2025-11-18
+## [v0.2.0] - 2026-01-18
 ### added
 - Added protocol recognition
 

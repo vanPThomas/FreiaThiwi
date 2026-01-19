@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(FreiaThiwi VERSION 0.2.0 LANGUAGES CXX)
+project(FreiaThiwi VERSION 0.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # ---- version -------------------------------------------------
 set(PROJECT_VERSION_MAJOR 0)
 set(PROJECT_VERSION_MINOR 2)
-set(PROJECT_VERSION_PATCH 0)
+set(PROJECT_VERSION_PATCH 1)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 
 # make the macro visible to the source
@@ -33,10 +33,10 @@ set_target_properties(freia-thiwi PROPERTIES
 )
 
 # Raspberry Pi? Just works.
-# Japan? Just works.
-# EU police raid? Binary is 300 KB. Burn the Pi.
+# Japan? USA? Just works.
+# Police raid? Binary is 300 KB. Burn the Pi.
 message("
 𐍆𐍂𐌴𐌹𐌰 𐌸𐌹𐍅𐌹 v${PROJECT_VERSION} - The maid is ready.
 Three passwords. Zero trust. Runs on a €35 computer.
-EU-proof. Raid-proof. Future-proof.
+Dictator-proof. Raid-proof. Future-proof.
 ")

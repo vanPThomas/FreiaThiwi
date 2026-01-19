@@ -27,6 +27,7 @@ private:
     void connectNewClientSocket();
     void handleClientActivity();
     std::vector<std::string> splitByNewline(const std::string& s);
+    void processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext);
 
 
     int maxClients;

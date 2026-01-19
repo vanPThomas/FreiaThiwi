@@ -136,67 +136,69 @@ void Server::handleClientActivity()
         }
 
         auto parts = splitByNewline(plaintext);
-        if (parts.empty() || parts.size() < 3)
-        {
-            std::cout << "[Protocol error] Malformed Protocol\n";
-            closeClientSocket(i);
-            continue;
-        }
-        
-        std::string protocol = parts [0];
+        std::string protocol = parts[0];
         if(protocol == "PROT1")
         {
-            std::string username = parts[1];
-            size_t innerLen = 0;
-            try {
-                innerLen = std::stoul(parts[2]);
-            } catch (...) {
-                std::cout << "[Protocol error] Invalid length field\n";
-                closeClientSocket(i);
-                continue;
-            }
-    
-            if (innerLen == 0 || innerLen > plaintext.size())
-            {
-                std::cout << "[Protocol error] Inner length out of range\n";
-                closeClientSocket(i);
-                continue;
-            }
-    
-            std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
-    
-            // Success! Log what we got
-            std::cout << "[PROT1] From user '" << username << "' - inner ciphertext size: " << innerLen << " bytes\n";
-            
-            // send to all connected
-            for (int j = 0; j < maxClients; ++j)
-            {
-                int sdTarget = clientSocket[j];
-                if (sdTarget != 0 && sdTarget != sd)
-                {
-                    ssize_t s1 = send(sdTarget, &netLen, sizeof(netLen), 0);
-                    ssize_t s2 = send(sdTarget, encrypted.data(), len, 0);
-
-                    if (s1 != sizeof(netLen) || s2 != static_cast<ssize_t>(len))
-                    {
-                        std::cout << "[Warning] Failed to forward to socket " << sdTarget << "\n";
-                    }
-                    else
-                    {
-                        std::cout << "[Forwarded] " << len << " bytes to socket " << sdTarget << "\n";
-                    }
-                }
-            }
+            processProt1(i, encrypted, plaintext);
         }
         else
         {
-            std::cout << "[Unknown protocol] " << parts[0] << " - closing connection\n";
-            closeClientSocket(i);
-            continue;
+            std::cout << "[Protocol error] Malformed or missing Protocol1\n";
         }
-
-        // TODO later: store username -> sd mapping
     }
+}
+
+void Server::processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext)
+{
+    int sd = clientSocket[clientIndex];
+
+    auto parts = splitByNewline(plaintext);
+
+    std::string username = parts[1];
+    size_t innerLen = 0;
+    try {
+        innerLen = std::stoul(parts[2]);
+    } catch (...) {
+        std::cout << "[Protocol error] Invalid length field\n";
+        closeClientSocket(clientIndex);
+        return;
+    }
+
+    if (innerLen == 0 || innerLen > plaintext.size())
+    {
+        std::cout << "[Protocol error] Inner length out of range\n";
+        closeClientSocket(clientIndex);
+        return;
+    }
+
+    std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
+
+    // Success! Log
+    std::cout << "[PROT1] From user '" << username << "' - inner ciphertext size: "
+              << innerLen << " bytes\n";
+
+    // Forward the original encrypted packet to all other clients
+    uint32_t netLen = htonl(encrypted.size());  // original encrypted length
+    for (int j = 0; j < maxClients; ++j)
+    {
+        int sdTarget = clientSocket[j];
+        if (sdTarget != 0 && sdTarget != sd)
+        {
+            ssize_t s1 = send(sdTarget, &netLen, sizeof(netLen), 0);
+            ssize_t s2 = send(sdTarget, encrypted.data(), encrypted.size(), 0);
+
+            if (s1 != sizeof(netLen) || s2 != static_cast<ssize_t>(encrypted.size()))
+            {
+                std::cout << "[Warning] Failed to forward to socket " << sdTarget << "\n";
+            }
+            else
+            {
+                std::cout << "[Forwarded] " << encrypted.size() << " bytes to socket " << sdTarget << "\n";
+            }
+        }
+    }
+
+    // TODO later: store username -> sd mapping
 }
 
 void Server::run()

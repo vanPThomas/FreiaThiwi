@@ -1,3 +1,21 @@
+## [v0.3.0] - 2026-01-22
+### Added
+- Initial server authentication handshake (PROT2)
+  - Clients must now send an encrypted handshake containing username immediately after TCP connect
+  - Server verifies server password correctness via decryption
+  - Username is extracted and stored upon successful handshake
+  - Only authenticated clients are added to the active client list
+- Server sends encrypted "OK" reply on successful authentication
+- Immediate socket close on handshake failure (wrong password, malformed frame, etc.)
+- Username is now available right after connect (prepares for future system messages like disconnect notices)
+
+### Changed
+- Connection flow is now strictly authenticated before any chat messages are processed
+
+### Security
+- Username never sent in plaintext
+- Server password enforcement happens at the very first packet
+
 ## [v0.2.2] - 2026-01-20
 ### Changed
 - server.cpp: Added mutex to lock delicate code to avoid undefined behavior

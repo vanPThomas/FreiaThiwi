@@ -77,18 +77,125 @@ void Server::connectNewClientSocket()
 {
     if (FD_ISSET(masterSocket, &readfds))
     {
-        newSocket = accept(masterSocket, (struct sockaddr *)&address, (socklen_t *)&addrlen);
-        std::cout << "New connection , socket fd is " << newSocket << " , ip is " << inet_ntoa(address.sin_addr) << " , port : " << ntohs(address.sin_port) << "\n";
+        int newSocket = accept(masterSocket, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+        if (newSocket < 0) {
+            handleSystemCallError("accept failed");
+            return;
+        }
+
+        std::string clientIp = inet_ntoa(address.sin_addr);
+        int clientPort = ntohs(address.sin_port);
+        std::cout << "New incoming connection: " << clientIp << ":" << clientPort << " (fd=" << newSocket << ")\n";        
         
-        for (int i = 0; i < maxClients; i++)
+        // ────────────────────────────────────────────────
+        //  HANDSHAKE / AUTHENTICATION RIGHT HERE
+        // ────────────────────────────────────────────────
+
+        // 1. Read length prefix
+        uint32_t lenNet = 0;
+        int r = recv(newSocket, &lenNet, sizeof(lenNet), MSG_WAITALL);
+        if (r != sizeof(lenNet)) {
+            std::cout << "Handshake failed: incomplete length prefix from " 
+                    << clientIp << ":" << clientPort << "\n";
+            close(newSocket);
+            return;
+        }
+
+        uint32_t len = ntohl(lenNet);
+        if (len == 0 || len > 65536) {
+            std::cout << "Handshake failed: invalid length " << len 
+                    << " from " << clientIp << ":" << clientPort << "\n";
+            close(newSocket);
+            return;
+        }
+
+        // 2. Read ciphertext
+        std::string cipher(len, '\0');
+        r = recv(newSocket, cipher.data(), len, MSG_WAITALL);
+        if (r != static_cast<int>(len)) {
+            std::cout << "Handshake failed: incomplete payload from " 
+                    << clientIp << ":" << clientPort << "\n";
+            close(newSocket);
+            return;
+        }
+
+        // 3. Decrypt
+        std::string plain = FreiaEncryption::decryptData(cipher, serverKey);
+        if (plain.empty()) {
+            std::cout << "Handshake failed: decryption failed (wrong password?) from " 
+                    << clientIp << ":" << clientPort << "\n";
+            close(newSocket);
+            return;
+        }
+
+        // 4. Parse PROT2 handshake
+        auto parts = splitByNewline(plain);
+        if (parts.size() < 2 || parts[0] != "PROT2") {
+            std::cout << "Handshake failed: invalid format from " 
+                    << clientIp << ":" << clientPort << "\n";
+            close(newSocket);
+            return;
+        }
+
+        std::string username = parts[1];
+        // Optional: validate username (length, chars, sanitize)
+        if (username.empty() || username.size() > 64) {
+            std::cout << "Handshake failed: invalid username length from " 
+                    << clientIp << ":" << clientPort << "\n";
+            close(newSocket);
+            return;
+        }
+
+        // ────────────────────────────────────────────────
+        // SUCCESS: authenticated & username known
+        // ────────────────────────────────────────────────
+
+        // Store username immediately
         {
             std::lock_guard<std::mutex> lock(socketMutex);
-            if (clientSocket[i] == 0)
-            {
-                clientSocket[i] = newSocket;
-                std::cout << "Adding to list of sockets as " << i << "\n";
-                break;
+            socketToUsername[newSocket] = username;
+        }
+
+        std::cout << "Authenticated: " << username << " from " 
+                << clientIp << ":" << clientPort << " (fd=" << newSocket << ")\n";
+
+        // 5. Send OK reply (encrypted)
+        std::string okPlain = "PROT2\nWelcome " + username + "!";
+        std::string okCipher = FreiaEncryption::encryptData(okPlain, serverKey);
+        if (okCipher.empty()) {
+            std::cerr << "[Critical] Failed to encrypt PROT2 reply\n";
+            close(newSocket);
+            socketToUsername.erase(newSocket);
+            return;
+        }
+
+        uint32_t okLenNet = htonl(okCipher.size());
+        if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
+            send(newSocket, okCipher.data(), okCipher.size(), 0) != static_cast<ssize_t>(okCipher.size())) {
+            std::cout << "Failed to send OK reply to " << username << "\n";
+            close(newSocket);
+            socketToUsername.erase(newSocket);
+            return;
+        }
+                
+        bool added = false;
+        {
+            std::lock_guard<std::mutex> lock(socketMutex);
+            for (int i = 0; i < maxClients; ++i) {
+                if (clientSocket[i] == 0) {
+                    clientSocket[i] = newSocket;
+                    std::cout << "Added authenticated client " << username 
+                            << " at slot " << i << "\n";
+                    added = true;
+                    break;
+                }
             }
+
+        }
+        if (!added) {
+            std::cout << "Server full - rejecting " << username << "\n";
+            close(newSocket);
+            socketToUsername.erase(newSocket);
         }
     }
 }
@@ -153,8 +260,6 @@ void Server::handleClientActivity()
 
 void Server::processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext)
 {
-    std::cout << "test\n";
-
     int currentSocket = clientSocket[clientIndex];
 
     auto parts = splitByNewline(plaintext);

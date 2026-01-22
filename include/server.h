@@ -13,6 +13,7 @@
 #include <string>
 #include "FreiaEncryption.h"
 #include <mutex>
+#include <unordered_map>
 
 class Server {
 public:
@@ -48,6 +49,8 @@ private:
     static constexpr int MAX_PACKET_SIZE = 1024;
     char buffer[MAX_PACKET_SIZE];
     int masterSocket = -1;
+
+    std::unordered_map<int, std::string> socketToUsername;
 
     std::mutex socketMutex;
 };

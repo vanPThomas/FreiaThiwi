@@ -1,3 +1,9 @@
+# [0.3.1] - 2026-01-23
+## Added
+- Added PROT3 for server messages
+- Added user disconnect message
+
+
 ## [v0.3.0] - 2026-01-22
 ### Added
 - Initial server authentication handshake (PROT2)

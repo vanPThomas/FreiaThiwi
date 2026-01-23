@@ -202,9 +202,9 @@ void Server::connectNewClientSocket()
 
 void Server::handleClientActivity()
 {
+    std::lock_guard<std::mutex> lock(socketMutex);
     for (int i = 0; i < maxClients; i++)
     {
-        std::lock_guard<std::mutex> lock(socketMutex);
         currentSocket = clientSocket[i];
         if (currentSocket == 0 || !FD_ISSET(currentSocket, &readfds))
             continue;
@@ -216,7 +216,8 @@ void Server::handleClientActivity()
             getpeername(currentSocket, (struct sockaddr*)&address, (socklen_t*)&addrlen);
             std::cout << "Host disconnected! ip: " << inet_ntoa(address.sin_addr)
                       << " port: " << ntohs(address.sin_port) << "\n";
-            closeClientSocket(i);
+            disconnectClient(i, "Client Disconnected");
+            // closeClientSocket(i);
             continue;
         }
 
@@ -235,7 +236,6 @@ void Server::handleClientActivity()
             disconnectClient(i, "[Error] Failed to read payload\n");
             continue;
         }
-
         // Decrypt with server password key
         std::string plaintext = FreiaEncryption::decryptData(encrypted, serverKey);
         if (plaintext.empty())
@@ -311,6 +311,44 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
     }
 }
 
+void Server::broadcastProt3(const std::string& messageText, const std::string& messageType)
+{
+
+    std::string frame = "PROT3\n" + messageType + "\n" + messageText;
+
+    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
+    if (encrypted.empty()) {
+        std::cerr << "[Error] Failed to encrypt PROT3 message\n";
+        return;
+    }
+
+    uint32_t len = encrypted.size();
+    uint32_t netLen = htonl(len);
+
+    //std::lock_guard<std::mutex> lock(socketMutex);
+
+    for (int j = 0; j < maxClients; ++j) {
+        int target = clientSocket[j];
+        if (target <= 0) continue;
+
+        // Optional: skip the disconnecting client if you have its fd available
+        // if (target == currentSocket) continue;  // but currentSocket not in scope here
+
+        ssize_t s1 = send(target, &netLen, sizeof(netLen), 0);
+        ssize_t s2 = send(target, encrypted.data(), encrypted.size(), 0);
+        std::cout << "TESTTEST!\n";
+
+        if (s1 != sizeof(netLen) || s2 != static_cast<ssize_t>(encrypted.size())) {
+            std::cerr << "[Warning] Failed to send PROT3 to socket " << target << "\n";
+            // You could close this socket here if you want aggressive cleanup
+        } else {
+            // Optional debug log
+            std::cout << "[Sent PROT3] " << messageType << " (" << len << " bytes) to " << target << "\n";
+
+        }
+    }
+}
+
 void Server::run()
 {
     while (true)
@@ -344,8 +382,30 @@ std::vector<std::string> Server::splitByNewline(const std::string& s)
 
 void Server::disconnectClient(int index, const std::string& reason)
 {
-    getpeername(clientSocket[index], (struct sockaddr*)&address, (socklen_t*)&addrlen);
+    int victimFd = clientSocket[index];           // remember before we zero it
+
+    std::string username = "Unknown";
+    {
+        // std::lock_guard<std::mutex> lock(socketMutex);
+        auto it = socketToUsername.find(victimFd);
+        if (it != socketToUsername.end()) {
+            username = it->second;
+            socketToUsername.erase(it);
+        }
+    }
+
+    std::string message = username + " disconnected.";
+    std::string messageType = "userDisconnected";
+
+    // Close & clear **first**
+    closeClientSocket(index);   // now clientSocket[index] = 0 and fd closed
+
+    // Now broadcast — loop will skip this slot because == 0
+    broadcastProt3(message, messageType);
+
+    // Log last
+    getpeername(victimFd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
     std::cerr << "Client disconnected (" << reason << "): "
-              << inet_ntoa(address.sin_addr) << ":" << ntohs(address.sin_port) << "\n";
-    closeClientSocket(index);
+              << inet_ntoa(address.sin_addr) << ":" << ntohs(address.sin_port)
+              << " (" << username << ")\n";
 }

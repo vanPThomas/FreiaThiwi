@@ -1,5 +1,9 @@
-# [0.3.1] - 2026-01-23
-## Added
+## [0.3.2] - 2026-01-26
+### Added
+- Added PRO3 message to send connected clients to all clients
+
+## [0.3.1] - 2026-01-23
+### Added
 - Added PROT3 for server messages
 - Added user disconnect message
 

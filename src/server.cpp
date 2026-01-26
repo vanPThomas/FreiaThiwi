@@ -169,6 +169,9 @@ void Server::connectNewClientSocket()
             return;
         }
 
+        sendFullUserList(newSocket);
+        broadcastProt3(username, "userJoined");
+
         uint32_t okLenNet = htonl(okCipher.size());
         if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
             send(newSocket, okCipher.data(), okCipher.size(), 0) != static_cast<ssize_t>(okCipher.size())) {
@@ -311,42 +314,82 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
     }
 }
 
-void Server::broadcastProt3(const std::string& messageText, const std::string& messageType)
+// void Server::broadcastProt3(const std::string& messageText, const std::string& messageType)
+// {
+
+//     std::string frame = "PROT3\n" + messageType + "\n" + messageText;
+
+//     std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
+//     if (encrypted.empty()) {
+//         std::cerr << "[Error] Failed to encrypt PROT3 message\n";
+//         return;
+//     }
+
+//     uint32_t len = encrypted.size();
+//     uint32_t netLen = htonl(len);
+
+//     //std::lock_guard<std::mutex> lock(socketMutex);
+
+//     for (int j = 0; j < maxClients; ++j) {
+//         int target = clientSocket[j];
+//         if (target <= 0) continue;
+
+//         // Optional: skip the disconnecting client if you have its fd available
+//         // if (target == currentSocket) continue;  // but currentSocket not in scope here
+
+//         ssize_t s1 = send(target, &netLen, sizeof(netLen), 0);
+//         ssize_t s2 = send(target, encrypted.data(), encrypted.size(), 0);
+//         std::cout << "TESTTEST!\n";
+
+//         if (s1 != sizeof(netLen) || s2 != static_cast<ssize_t>(encrypted.size())) {
+//             std::cerr << "[Warning] Failed to send PROT3 to socket " << target << "\n";
+//             // You could close this socket here if you want aggressive cleanup
+//         } else {
+//             // Optional debug log
+//             std::cout << "[Sent PROT3] " << messageType << " (" << len << " bytes) to " << target << "\n";
+
+//         }
+//     }
+// }
+
+
+// Modified broadcastProt3 — add optional target parameter for unicast
+void Server::broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo)
 {
-
     std::string frame = "PROT3\n" + messageType + "\n" + messageText;
-
     std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
-    if (encrypted.empty()) {
-        std::cerr << "[Error] Failed to encrypt PROT3 message\n";
-        return;
-    }
-
-    uint32_t len = encrypted.size();
-    uint32_t netLen = htonl(len);
-
-    //std::lock_guard<std::mutex> lock(socketMutex);
-
+    if (encrypted.empty()) return;
+    
+    uint32_t lenNet = htonl(encrypted.size());
+    
+    // std::lock_guard<std::mutex> lock(socketMutex);
+    
     for (int j = 0; j < maxClients; ++j) {
         int target = clientSocket[j];
         if (target <= 0) continue;
+        if (onlyTo != -1 && target != onlyTo) continue;
 
-        // Optional: skip the disconnecting client if you have its fd available
-        // if (target == currentSocket) continue;  // but currentSocket not in scope here
+        send(target, &lenNet, sizeof(lenNet), 0);
+        send(target, encrypted.data(), encrypted.size(), 0);
+    }
+}
 
-        ssize_t s1 = send(target, &netLen, sizeof(netLen), 0);
-        ssize_t s2 = send(target, encrypted.data(), encrypted.size(), 0);
-        std::cout << "TESTTEST!\n";
-
-        if (s1 != sizeof(netLen) || s2 != static_cast<ssize_t>(encrypted.size())) {
-            std::cerr << "[Warning] Failed to send PROT3 to socket " << target << "\n";
-            // You could close this socket here if you want aggressive cleanup
-        } else {
-            // Optional debug log
-            std::cout << "[Sent PROT3] " << messageType << " (" << len << " bytes) to " << target << "\n";
-
+// Send full user list to one specific client (called after handshake success)
+void Server::sendFullUserList(int targetSocket)
+{
+    std::string list;
+    {
+        std::lock_guard<std::mutex> lock(socketMutex);
+        for (const auto& [fd, name] : socketToUsername) {
+            if (fd == targetSocket) continue;           // optional: exclude self
+            if (!list.empty()) list += "\n";
+            list += name;
         }
     }
+
+    if (list.empty()) list = "";  // or "No one else here" etc.
+
+    broadcastProt3(list, "userList", targetSocket);  // we'll modify broadcast to support unicast
 }
 
 void Server::run()
@@ -398,10 +441,10 @@ void Server::disconnectClient(int index, const std::string& reason)
     std::string messageType = "userDisconnected";
 
     // Close & clear **first**
-    closeClientSocket(index);   // now clientSocket[index] = 0 and fd closed
-
-    // Now broadcast — loop will skip this slot because == 0
+    closeClientSocket(index);
+    
     broadcastProt3(message, messageType);
+    broadcastProt3(username + " disconnected.", "userLeft");
 
     // Log last
     getpeername(victimFd, (struct sockaddr*)&address, (socklen_t*)&addrlen);

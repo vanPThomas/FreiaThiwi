@@ -138,7 +138,7 @@ void Server::connectNewClientSocket()
         }
 
         std::string username = parts[1];
-        // Optional: validate username (length, chars, sanitize)
+        // Validate username (length, chars, sanitize)
         if (username.empty() || username.size() > 64) {
             std::cout << "Handshake failed: invalid username length from " 
                     << clientIp << ":" << clientPort << "\n";
@@ -256,7 +256,6 @@ void Server::handleClientActivity()
         }
         else
         {
-            // std::cout << "[Protocol error] Malformed or missing Protocol1\n";
             handleSystemCallError("[Protocol error] Malformed or missing Protocol1\n");
         }
     }
@@ -326,7 +325,6 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
     
     if (onlyTo == -1)
     {
-        // std::cout << frame << "\n";
         for (int j = 0; j < maxClients; ++j) {
             int target = clientSocket[j];
             if (target <= 0) continue;
@@ -340,13 +338,10 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
     {
         for (int j = 0; j < maxClients; ++j) {
             int target = clientSocket[j];
-            if (target <= 0) continue;               // ← add this!
-            std::cout << "[unicast check] slot " << j << ": target=" << target 
-                    << " (looking for " << onlyTo << ")\n";  // ← debug every iteration
+            if (target <= 0) continue;
 
             if (target == onlyTo)
             {
-                std::cout << "[MATCH FOUND] Sending " << messageType << ": " << frame << "\n";
                 send(target, &lenNet, sizeof(lenNet), 0);
                 send(target, encrypted.data(), encrypted.size(), 0);
             }
@@ -355,21 +350,18 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
         
 }
 
-// Send full user list to one specific client (called after handshake success)
+// Send full user list to one specific client
 void Server::sendFullUserList(int targetSocket)
 {
     std::string list;
     {
         for (const auto& [fd, name] : socketToUsername) {
-            // if (fd == targetSocket) continue;           // optional: exclude self
             if (!list.empty()) list += "\n";
             list += name;
-            // std::cout << name << "\n";
         }
     }
 
     if (list.empty()) list = "";
-    std::cout << list << "\n";
     broadcastProt3(list, "userList", targetSocket);
 }
 
@@ -410,7 +402,6 @@ void Server::disconnectClient(int index, const std::string& reason)
 
     std::string username = "Unknown";
     {
-        // std::lock_guard<std::mutex> lock(socketMutex);
         auto it = socketToUsername.find(victimFd);
         if (it != socketToUsername.end()) {
             username = it->second;

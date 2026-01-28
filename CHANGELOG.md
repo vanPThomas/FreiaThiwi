@@ -1,8 +1,15 @@
-## [0.3.2] - 2026-01-26
+# Changelog
+All notable changes to **Freia Thiwi** will be documented here.
+
+## [v0.3.3] - 2026-01-28
+### Fixed
+- Fixed bug where all online people wasn't properly shown
+
+## [v0.3.2] - 2026-01-26
 ### Added
 - Added PRO3 message to send connected clients to all clients
 
-## [0.3.1] - 2026-01-23
+## [v0.3.1] - 2026-01-23
 ### Added
 - Added PROT3 for server messages
 - Added user disconnect message

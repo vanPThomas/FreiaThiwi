@@ -416,7 +416,7 @@ void Server::disconnectClient(int index, const std::string& reason)
     closeClientSocket(index);
     
     broadcastProt3(message, messageType);
-    broadcastProt3(username + " disconnected.", "userLeft");
+    broadcastProt3(username, "userLeft");
 
     // Log last
     getpeername(victimFd, (struct sockaddr*)&address, (socklen_t*)&addrlen);

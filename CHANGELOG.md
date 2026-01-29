@@ -1,6 +1,10 @@
 # Changelog
 All notable changes to **Freia Thiwi** will be documented here.
 
+## [v0.3.4] - 2026-01-29
+### Fixed
+- 
+
 ## [v0.3.3] - 2026-01-28
 ### Fixed
 - Fixed bug where all online people wasn't properly shown

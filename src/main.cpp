@@ -25,7 +25,7 @@ int main()
         return 1;
     }
 
-    std::cin.ignore();  // clear newline
+    std::cin.ignore();
     std::cout << "Server Password: ";
     std::getline(std::cin, serverPassword);
     if (serverPassword.empty()) {

@@ -30,7 +30,6 @@ private:
     void handleClientActivity();
     std::vector<std::string> splitByNewline(const std::string& s);
     void processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext);
-    // void broadcastProt3(const std::string& messageText, const std::string& messageType);
     void disconnectClient(int index, const std::string& reason = "Unknown");
     void sendFullUserList(int targetSocket);
     void broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo = -1); // -1 is broadcast to all 

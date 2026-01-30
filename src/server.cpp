@@ -87,9 +87,7 @@ void Server::connectNewClientSocket()
         int clientPort = ntohs(address.sin_port);
         std::cout << "New incoming connection: " << clientIp << ":" << clientPort << " (fd=" << newSocket << ")\n";        
         
-        // ────────────────────────────────────────────────
-        //  HANDSHAKE / AUTHENTICATION RIGHT HERE
-        // ────────────────────────────────────────────────
+        //  HANDSHAKE / AUTHENTICATION
 
         // 1. Read length prefix
         uint32_t lenNet = 0;
@@ -146,9 +144,7 @@ void Server::connectNewClientSocket()
             return;
         }
 
-        // ────────────────────────────────────────────────
         // SUCCESS: authenticated & username known
-        // ────────────────────────────────────────────────
 
         // Store username immediately
         {
@@ -221,7 +217,6 @@ void Server::handleClientActivity()
             std::cout << "Host disconnected! ip: " << inet_ntoa(address.sin_addr)
                       << " port: " << ntohs(address.sin_port) << "\n";
             disconnectClient(i, "Client Disconnected");
-            // closeClientSocket(i);
             continue;
         }
 
@@ -286,7 +281,6 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
 
     std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
 
-    // Success! Log
     std::cout << "[PROT1] From user '" << username << "' - inner ciphertext size: "
               << innerLen << " bytes\n";
 
@@ -412,7 +406,7 @@ void Server::disconnectClient(int index, const std::string& reason)
     std::string message = username + " disconnected.";
     std::string messageType = "userDisconnected";
 
-    // Close & clear **first**
+    // Close & clear
     closeClientSocket(index);
     
     broadcastProt3(message, messageType);

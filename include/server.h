@@ -33,6 +33,9 @@ private:
     void disconnectClient(int index, const std::string& reason = "Unknown");
     void sendFullUserList(int targetSocket);
     void broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo = -1); // -1 is broadcast to all 
+    void processProt4(int clientIndex, const std::string& plaintext);
+    void sendSuccess(int sock, const std::string& msg);
+    void sendError(int sock, const std::string& reason);
 
 
     int maxClients;
@@ -55,4 +58,6 @@ private:
     std::unordered_map<int, std::string> socketToUsername;
 
     std::mutex socketMutex;
+
+    std::unordered_map<std::string, std::string> accounts;  // username → base64-encoded derived key
 };

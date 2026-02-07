@@ -249,6 +249,9 @@ void Server::handleClientActivity()
         {
             processProt1(i, encrypted, plaintext);
         }
+        else if (protocol == "PROT4") {
+            processProt4(i, plaintext);
+        }
         else
         {
             handleSystemCallError("[Protocol error] Malformed or missing Protocol1\n");
@@ -313,7 +316,6 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
     std::string frame = "PROT3\n" + messageType + "\n" + messageText;
     std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
     if (encrypted.empty()) return;
-    std::cout << onlyTo << "\n";
     
     uint32_t lenNet = htonl(encrypted.size());
     
@@ -342,6 +344,55 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
         }
     }
         
+}
+
+void Server::processProt4(int clientIndex, const std::string& plaintext)
+{
+    int sock = clientSocket[clientIndex];
+
+    auto parts = splitByNewline(plaintext);
+    if (parts.size() < 3) {
+        sendError(sock, "Malformed PROT4");
+        return;
+    }
+
+    std::string cmd = parts[1];
+    std::string username = parts[2];
+    std::string receivedKeyB64 = (parts.size() > 3) ? parts[3] : "";
+
+    // Basic validation
+    if (username.empty() || username.size() > 64 || receivedKeyB64.empty()) {
+        sendError(sock, "Invalid username or key");
+        return;
+    }
+
+    if (cmd == "CREATE") {
+        if (accounts.find(username) != accounts.end()) {
+            sendError(sock, "Username already taken");
+            return;
+        }
+
+        accounts[username] = receivedKeyB64;
+        std::cout << "[Account created] " << username << "\n";
+        sendSuccess(sock, "Account created successfully");
+    }
+    else if (cmd == "LOGIN") {
+        auto it = accounts.find(username);
+        if (it == accounts.end()) {
+            sendError(sock, "Username not found");
+            return;
+        }
+
+        if (it->second == receivedKeyB64) {
+            std::cout << "[Login success] " << username << "\n";
+            sendSuccess(sock, "Login successful");
+        } else {
+            sendError(sock, "Incorrect account password");
+        }
+    }
+    else {
+        sendError(sock, "Unknown PROT4 command");
+    }
 }
 
 // Send full user list to one specific client
@@ -417,4 +468,29 @@ void Server::disconnectClient(int index, const std::string& reason)
     std::cerr << "Client disconnected (" << reason << "): "
               << inet_ntoa(address.sin_addr) << ":" << ntohs(address.sin_port)
               << " (" << username << ")\n";
+}
+
+void Server::sendSuccess(int sock, const std::string& msg = "")
+{
+    std::string frame = "PROT4\nSUCCESS";
+    if (!msg.empty()) frame += "\n" + msg;
+
+    std::string enc = FreiaEncryption::encryptData(frame, serverKey);
+    if (enc.empty()) return;
+
+    uint32_t lenNet = htonl(enc.size());
+    send(sock, &lenNet, sizeof(lenNet), 0);
+    send(sock, enc.data(), enc.size(), 0);
+}
+
+void Server::sendError(int sock, const std::string& reason)
+{
+    std::string frame = "PROT4\nFAIL\n" + reason;
+
+    std::string enc = FreiaEncryption::encryptData(frame, serverKey);
+    if (enc.empty()) return;
+
+    uint32_t lenNet = htonl(enc.size());
+    send(sock, &lenNet, sizeof(lenNet), 0);
+    send(sock, enc.data(), enc.size(), 0);
 }

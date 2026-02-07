@@ -1,6 +1,27 @@
 # Changelog
 All notable changes to **Freia Thiwi** will be documented here.
 
+## [0.4.0] - 2026-02-07
+### Added
+- Full account system: user registration and login with per-account passwords
+- New PROT4 protocol for account creation (`CREATE`) and login (`LOGIN`)
+- In-memory account storage (username → base64-encoded derived key) as temporary DB replacement
+- Server validates account credentials after PROT2 transport handshake
+- Proper SUCCESS/FAIL replies for account operations
+- Error handling for duplicate usernames, wrong passwords, malformed requests
+
+### Changed
+- Authentication now layered: PROT2 (server password) → PROT4 (account credentials)
+- Existing shared-server-password clients still work (PROT2 only)
+
+### Security
+- Passwords never stored in plaintext — only derived keys (Argon2id) are kept
+- All account traffic protected by existing transport encryption
+
+This release introduces persistent user identity while preserving the original lightweight, privacy-first design.
+
+---
+
 ## [v0.3.5] - 2026-01-30
 ### Changed
 - Cleaned up code

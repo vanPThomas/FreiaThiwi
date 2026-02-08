@@ -18,7 +18,7 @@ Designed for oppressed, restricted, and privacy-seeking users who deserve safe c
 This project is not a wrapper around an existing library.  
 It is a deep dive into systems programming, networking, and cryptography.
 
-This repo is the client side of the Freia Thiwi Project, the server is not publicly available.
+This repo is the server side of the Freia Thiwi Project,
 
 ---
 

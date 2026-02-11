@@ -165,10 +165,8 @@ void Server::connectNewClientSocket()
             return;
         }
 
-        
-        uint32_t okLenNet = htonl(okCipher.size());
-        if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
-        send(newSocket, okCipher.data(), okCipher.size(), 0) != static_cast<ssize_t>(okCipher.size())) {
+        if (!sendWithLengthPrefix(newSocket, okCipher))
+        {
             std::cout << "Failed to send OK reply to " << username << "\n";
             close(newSocket);
             socketToUsername.erase(newSocket);
@@ -287,18 +285,12 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
     std::cout << "[PROT1] From user '" << username << "' - inner ciphertext size: "
               << innerLen << " bytes\n";
 
-    // Forward the original encrypted packet to all other clients
-    uint32_t packetLengthNet = htonl(encrypted.size());  // original encrypted length
     for (int j = 0; j < maxClients; ++j)
     {
         int socketTarget = clientSocket[j];
         if (socketTarget != 0 && socketTarget != currentSocket)
         {
-
-            ssize_t s1 = send(socketTarget, &packetLengthNet, sizeof(packetLengthNet), 0);
-            ssize_t s2 = send(socketTarget, encrypted.data(), encrypted.size(), 0);
-
-            if (s1 != sizeof(packetLengthNet) || s2 != static_cast<ssize_t>(encrypted.size()))
+            if(!sendWithLengthPrefix(socketTarget, encrypted))
             {
                 std::string errWarning = "[Warning] Failed to forward to socket " + socketTarget + std::string("\n");
                 handleSystemCallError(errWarning);
@@ -312,34 +304,29 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
 }
 
 void Server::broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo)
-{
+{        // if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
+
     std::string frame = "PROT3\n" + messageType + "\n" + messageText;
     std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
     if (encrypted.empty()) return;
-    
-    uint32_t lenNet = htonl(encrypted.size());
     
     if (onlyTo == -1)
     {
         for (int j = 0; j < maxClients; ++j) {
             int target = clientSocket[j];
-            if (target <= 0) continue;
             if (onlyTo != -1 && target != onlyTo) continue;
-            send(target, &lenNet, sizeof(lenNet), 0);
-            send(target, encrypted.data(), encrypted.size(), 0);
-            
+            sendWithLengthPrefix(target, encrypted);            
         }
     }
     else
     {
         for (int j = 0; j < maxClients; ++j) {
             int target = clientSocket[j];
-            if (target <= 0) continue;
+            // if (target <= 0) continue;
 
             if (target == onlyTo)
             {
-                send(target, &lenNet, sizeof(lenNet), 0);
-                send(target, encrypted.data(), encrypted.size(), 0);
+                sendWithLengthPrefix(target, encrypted);
             }
         }
     }
@@ -478,9 +465,8 @@ void Server::sendSuccess(int sock, const std::string& msg = "")
     std::string enc = FreiaEncryption::encryptData(frame, serverKey);
     if (enc.empty()) return;
 
-    uint32_t lenNet = htonl(enc.size());
-    send(sock, &lenNet, sizeof(lenNet), 0);
-    send(sock, enc.data(), enc.size(), 0);
+    sendWithLengthPrefix(sock, enc);
+    
 }
 
 void Server::sendError(int sock, const std::string& reason)
@@ -490,7 +476,14 @@ void Server::sendError(int sock, const std::string& reason)
     std::string enc = FreiaEncryption::encryptData(frame, serverKey);
     if (enc.empty()) return;
 
-    uint32_t lenNet = htonl(enc.size());
-    send(sock, &lenNet, sizeof(lenNet), 0);
-    send(sock, enc.data(), enc.size(), 0);
+    sendWithLengthPrefix(sock, enc);
+}
+
+bool Server::sendWithLengthPrefix(int sock, const std::string& data)
+{
+    if (sock <= 0) return false;
+    uint32_t lenNet = htonl(static_cast<uint32_t>(data.size()));
+    if (send(sock, &lenNet, sizeof(lenNet), 0) != sizeof(lenNet)) return false;
+    if (send(sock, data.data(), data.size(), 0) != static_cast<ssize_t>(data.size())) return false;
+    return true;
 }

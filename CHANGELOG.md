@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to **Freia Thiwi** will be documented here.
 
+## [0.4.1] - 2026-02-11
+### Changed
+- Created helper function sendWithLengthPrefix for cleaner code
+
+---
+
 ## [0.4.0] - 2026-02-07
 ### Added
 - Full account system: user registration and login with per-account passwords

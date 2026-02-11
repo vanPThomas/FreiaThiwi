@@ -36,6 +36,8 @@ private:
     void processProt4(int clientIndex, const std::string& plaintext);
     void sendSuccess(int sock, const std::string& msg);
     void sendError(int sock, const std::string& reason);
+    bool sendWithLengthPrefix(int sock, const std::string& data);
+
 
 
     int maxClients;

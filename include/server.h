@@ -62,7 +62,5 @@ private:
 
     std::mutex socketMutex;
 
-    // std::unordered_map<std::string, std::string> accounts;  // username → base64-encoded derived key
-
     AccountDatabase accountsDb;
 };

@@ -461,7 +461,6 @@ void Server::sendSuccess(int sock, const std::string& msg = "")
     if (enc.empty()) return;
 
     sendWithLengthPrefix(sock, enc);
-    
 }
 
 void Server::sendError(int sock, const std::string& reason)

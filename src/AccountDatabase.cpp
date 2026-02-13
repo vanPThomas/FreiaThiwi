@@ -10,7 +10,6 @@ AccountDatabase::AccountDatabase(const std::string& dbPath) {
         return;
     }
 
-    // Enable WAL mode for better concurrency
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
 
     if (!initializeSchema()) {

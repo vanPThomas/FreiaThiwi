@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to **Freia Thiwi** will be documented here.
 
+## [0.5.0] - 2026-02-13
+### Added
+- Proper Embedded Database has been added for accounts 
+
+---
+
 ## [0.4.1] - 2026-02-11
 ### Changed
 - Created helper function sendWithLengthPrefix for cleaner code

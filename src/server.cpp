@@ -1,7 +1,7 @@
 #include "server.h"
 
 Server::Server(int port, int maxClients, const std::string& password)
-    : maxClients(maxClients), PORT(port), serverPassword(password) {
+    : maxClients(maxClients), PORT(port), serverPassword(password), accountsDb("accounts.db") {
         serverKey = FreiaEncryption::deriveKey(serverPassword);
         masterSocket = initializeServerSocket();
         clientSocket.assign(maxClients, 0);
@@ -353,28 +353,23 @@ void Server::processProt4(int clientIndex, const std::string& plaintext)
         return;
     }
 
-    if (cmd == "CREATE") {
-        if (accounts.find(username) != accounts.end()) {
-            sendError(sock, "Username already taken");
-            return;
+    if (cmd == "CREATE")
+    {
+        if (accountsDb.createAccount(username, receivedKeyB64))
+        {
+            std::cout << "[Account created] " << username << "\n";
+            sendSuccess(sock, "Account created successfully");
+        } else {
+            sendError(sock, "Username already taken or creation failed");
         }
-
-        accounts[username] = receivedKeyB64;
-        std::cout << "[Account created] " << username << "\n";
-        sendSuccess(sock, "Account created successfully");
-    }
-    else if (cmd == "LOGIN") {
-        auto it = accounts.find(username);
-        if (it == accounts.end()) {
-            sendError(sock, "Username not found");
-            return;
-        }
-
-        if (it->second == receivedKeyB64) {
+    } else if (cmd == "LOGIN")
+    {
+        if (accountsDb.validateLogin(username, receivedKeyB64))
+        {
             std::cout << "[Login success] " << username << "\n";
             sendSuccess(sock, "Login successful");
         } else {
-            sendError(sock, "Incorrect account password");
+            sendError(sock, "Username not found or incorrect key");
         }
     }
     else {

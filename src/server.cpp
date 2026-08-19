@@ -1,5 +1,7 @@
 #include "server.h"
 
+
+// Server constructor
 Server::Server(int port, int maxClients, const std::string& password)
     : maxClients(maxClients), PORT(port), serverPassword(password), accountsDb("accounts.db") {
         serverKey = FreiaEncryption::deriveKey(serverPassword);
@@ -63,9 +65,9 @@ void Server::collectActiveClientSockets()
     }
 }
 
+// wait indeffinitely for socket activity (timeout is NULL)
 void Server::waitForServerActivity()
 {
-    // wait indeffinitely for socket activity (timeout is NULL)
     activity = select(max_socket + 1, &readfds, NULL, NULL, NULL);
     if ((activity < 0) && (errno != EINTR))
     {
@@ -73,6 +75,7 @@ void Server::waitForServerActivity()
     }
 }
 
+//Connect new client to server
 void Server::connectNewClientSocket()
 {
     if (FD_ISSET(masterSocket, &readfds))
@@ -198,6 +201,7 @@ void Server::connectNewClientSocket()
     }
 }
 
+// Handle any activity from any of the clients
 void Server::handleClientActivity()
 {
     std::lock_guard<std::mutex> lock(socketMutex);
@@ -257,6 +261,8 @@ void Server::handleClientActivity()
     }
 }
 
+
+// Process Protocol when One
 void Server::processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext)
 {
     int currentSocket = clientSocket[clientIndex];
@@ -303,6 +309,7 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
     }
 }
 
+// Process Protocol when 3
 void Server::broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo)
 {        // if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
 
@@ -333,6 +340,7 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
         
 }
 
+// Process Protocol when 4
 void Server::processProt4(int clientIndex, const std::string& plaintext)
 {
     int sock = clientSocket[clientIndex];
@@ -392,6 +400,7 @@ void Server::sendFullUserList(int targetSocket)
     broadcastProt3(list, "userList", targetSocket);
 }
 
+// Main server loop
 void Server::run()
 {
     while (true)
@@ -410,6 +419,7 @@ void Server::run()
     }
 }
 
+// Split a string based on new line marker
 std::vector<std::string> Server::splitByNewline(const std::string& s)
 {
     std::vector<std::string> lines;
@@ -423,6 +433,7 @@ std::vector<std::string> Server::splitByNewline(const std::string& s)
     return lines;
 }
 
+// Disconnect client from server
 void Server::disconnectClient(int index, const std::string& reason)
 {
     int victimFd = clientSocket[index];
@@ -452,6 +463,7 @@ void Server::disconnectClient(int index, const std::string& reason)
               << " (" << username << ")\n";
 }
 
+// Send Success Message using Protocol 4
 void Server::sendSuccess(int sock, const std::string& msg = "")
 {
     std::string frame = "PROT4\nSUCCESS";
@@ -463,6 +475,7 @@ void Server::sendSuccess(int sock, const std::string& msg = "")
     sendWithLengthPrefix(sock, enc);
 }
 
+// Send error message using protocol 4
 void Server::sendError(int sock, const std::string& reason)
 {
     std::string frame = "PROT4\nFAIL\n" + reason;
@@ -473,6 +486,7 @@ void Server::sendError(int sock, const std::string& reason)
     sendWithLengthPrefix(sock, enc);
 }
 
+// Send Package
 bool Server::sendWithLengthPrefix(int sock, const std::string& data)
 {
     if (sock <= 0) return false;

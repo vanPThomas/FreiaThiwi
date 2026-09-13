@@ -16,7 +16,8 @@
 #include <unordered_map>
 #include "AccountDatabase.h"
 
-class Server {
+class Server
+{
 public:
     Server(int port, int maxClients, const std::string& password);
     void run();
@@ -24,20 +25,31 @@ public:
 private:
     void handleSystemCallError(std::string errorMsg);
     int initializeServerSocket();
-    void closeClientSocket(int index);
-    void collectActiveClientSockets();
     void waitForServerActivity();
-    void connectNewClientSocket();
-    void handleClientActivity();
     std::vector<std::string> splitByNewline(const std::string& s);
+    bool sendWithLengthPrefix(int sock, const std::string& data);
+
+
+    // ====================================
+    // Protocol processing and creation
+    // ====================================
+
     void processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext);
-    void disconnectClient(int index, const std::string& reason = "Unknown");
-    void sendFullUserList(int targetSocket);
     void broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo = -1); // -1 is broadcast to all 
     void processProt4(int clientIndex, const std::string& plaintext);
     void sendSuccess(int sock, const std::string& msg);
     void sendError(int sock, const std::string& reason);
-    bool sendWithLengthPrefix(int sock, const std::string& data);
+
+    // ====================================
+    // Client activity
+    // ====================================
+
+    void connectNewClientSocket();
+    void handleClientActivity();
+    void sendFullUserList(int targetSocket);
+    void disconnectClient(int index, const std::string& reason = "Unknown");
+    void closeClientSocket(int index);
+    void collectActiveClientSockets();
 
 
 

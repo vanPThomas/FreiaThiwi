@@ -43,28 +43,6 @@ int Server::initializeServerSocket()
     return serverSocket;
 }
 
-void Server::closeClientSocket(int index)
-{
-    close(clientSocket[index]);
-    clientSocket[index] = 0;
-}
-
-void Server::collectActiveClientSockets()
-{
-    std::lock_guard<std::mutex> lock(socketMutex);
-    for (int i = 0; i < maxClients; i++)
-    {
-        currentSocket = clientSocket[i];
-
-        // if valid socket, add to set
-        if (currentSocket > 0)
-            FD_SET(currentSocket, &readfds);
-        // highest file descriptor number, needed for select func
-        if (currentSocket > max_socket)
-            max_socket = currentSocket;
-    }
-}
-
 // wait indeffinitely for socket activity (timeout is NULL)
 void Server::waitForServerActivity()
 {
@@ -74,6 +52,204 @@ void Server::waitForServerActivity()
         handleSystemCallError("Select error\n");
     }
 }
+
+// Main server loop
+void Server::run()
+{
+    while (true)
+    {
+        // clear socket set
+        FD_ZERO(&readfds);
+
+        // add mastersocket to socket set
+        FD_SET(masterSocket, &readfds);
+        max_socket = masterSocket;
+        
+        collectActiveClientSockets();
+        waitForServerActivity();
+        connectNewClientSocket();
+        handleClientActivity();
+    }
+}
+
+// Split a string based on new line marker
+std::vector<std::string> Server::splitByNewline(const std::string& s)
+{
+    std::vector<std::string> lines;
+    std::string line;
+    std::istringstream iss(s);
+    while (std::getline(iss, line)) {
+        if (!line.empty() || !lines.empty()) {
+            lines.push_back(std::move(line));
+        }
+    }
+    return lines;
+}
+
+// Send Package
+bool Server::sendWithLengthPrefix(int sock, const std::string& data)
+{
+    if (sock <= 0) return false;
+    uint32_t lenNet = htonl(static_cast<uint32_t>(data.size()));
+    if (send(sock, &lenNet, sizeof(lenNet), 0) != sizeof(lenNet)) return false;
+    if (send(sock, data.data(), data.size(), 0) != static_cast<ssize_t>(data.size())) return false;
+    return true;
+}
+
+
+// ====================================
+// Protocol processing and creation
+// ====================================
+
+// Process Protocol when One
+void Server::processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext)
+{
+    int currentSocket = clientSocket[clientIndex];
+
+    auto parts = splitByNewline(plaintext);
+
+    std::string username = parts[1];
+    size_t innerLen = 0;
+    try {
+        innerLen = std::stoul(parts[2]);
+    } catch (...) {
+        disconnectClient(clientIndex, "[Protocol error] Invalid length field\n");
+        return;
+    }
+    
+    if (innerLen == 0 || innerLen > plaintext.size())
+    {
+        handleSystemCallError("[Protocol error] Inner length out of range\n");
+        closeClientSocket(clientIndex);
+
+        return;
+    }
+
+    std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
+
+    std::cout << "[PROT1] From user '" << username << "' - inner ciphertext size: "
+              << innerLen << " bytes\n";
+
+    for (int j = 0; j < maxClients; ++j)
+    {
+        int socketTarget = clientSocket[j];
+        if (socketTarget != 0 && socketTarget != currentSocket)
+        {
+            if(!sendWithLengthPrefix(socketTarget, encrypted))
+            {
+                std::string errWarning = "[Warning] Failed to forward to socket " + socketTarget + std::string("\n");
+                handleSystemCallError(errWarning);
+            }
+            else
+            {
+                std::cout << "[Forwarded] " << encrypted.size() << " bytes to socket " << socketTarget << "\n";
+            }
+        }
+    }
+}
+
+// Process Protocol when 3
+void Server::broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo)
+{        // if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
+
+    std::string frame = "PROT3\n" + messageType + "\n" + messageText;
+    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
+    if (encrypted.empty()) return;
+    
+    if (onlyTo == -1)
+    {
+        for (int j = 0; j < maxClients; ++j) {
+            int target = clientSocket[j];
+            if (onlyTo != -1 && target != onlyTo) continue;
+            sendWithLengthPrefix(target, encrypted);            
+        }
+    }
+    else
+    {
+        for (int j = 0; j < maxClients; ++j) {
+            int target = clientSocket[j];
+            // if (target <= 0) continue;
+
+            if (target == onlyTo)
+            {
+                sendWithLengthPrefix(target, encrypted);
+            }
+        }
+    }
+        
+}
+
+// Process Protocol when 4
+void Server::processProt4(int clientIndex, const std::string& plaintext)
+{
+    int sock = clientSocket[clientIndex];
+
+    auto parts = splitByNewline(plaintext);
+    if (parts.size() < 3) {
+        sendError(sock, "Malformed PROT4");
+        return;
+    }
+
+    std::string cmd = parts[1];
+    std::string username = parts[2];
+    std::string receivedKeyB64 = (parts.size() > 3) ? parts[3] : "";
+
+    // Basic validation
+    if (username.empty() || username.size() > 64 || receivedKeyB64.empty()) {
+        sendError(sock, "Invalid username or key");
+        return;
+    }
+
+    if (cmd == "CREATE")
+    {
+        if (accountsDb.createAccount(username, receivedKeyB64))
+        {
+            std::cout << "[Account created] " << username << "\n";
+            sendSuccess(sock, "Account created successfully");
+        } else {
+            sendError(sock, "Username already taken or creation failed");
+        }
+    } else if (cmd == "LOGIN")
+    {
+        if (accountsDb.validateLogin(username, receivedKeyB64))
+        {
+            std::cout << "[Login success] " << username << "\n";
+            sendSuccess(sock, "Login successful");
+        } else {
+            sendError(sock, "Username not found or incorrect key");
+        }
+    }
+    else {
+        sendError(sock, "Unknown PROT4 command");
+    }
+}
+
+// Send Success Message using Protocol 4
+void Server::sendSuccess(int sock, const std::string& msg = "")
+{
+    std::string frame = "PROT4\nSUCCESS";
+    if (!msg.empty()) frame += "\n" + msg;
+
+    std::string enc = FreiaEncryption::encryptData(frame, serverKey);
+    if (enc.empty()) return;
+
+    sendWithLengthPrefix(sock, enc);
+}
+
+// Send error message using protocol 4
+void Server::sendError(int sock, const std::string& reason)
+{
+    std::string frame = "PROT4\nFAIL\n" + reason;
+
+    std::string enc = FreiaEncryption::encryptData(frame, serverKey);
+    if (enc.empty()) return;
+
+    sendWithLengthPrefix(sock, enc);
+}
+
+// ====================================
+// Client activity
+// ====================================
 
 //Connect new client to server
 void Server::connectNewClientSocket()
@@ -261,130 +437,6 @@ void Server::handleClientActivity()
     }
 }
 
-
-// Process Protocol when One
-void Server::processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext)
-{
-    int currentSocket = clientSocket[clientIndex];
-
-    auto parts = splitByNewline(plaintext);
-
-    std::string username = parts[1];
-    size_t innerLen = 0;
-    try {
-        innerLen = std::stoul(parts[2]);
-    } catch (...) {
-        disconnectClient(clientIndex, "[Protocol error] Invalid length field\n");
-        return;
-    }
-    
-    if (innerLen == 0 || innerLen > plaintext.size())
-    {
-        handleSystemCallError("[Protocol error] Inner length out of range\n");
-        closeClientSocket(clientIndex);
-
-        return;
-    }
-
-    std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
-
-    std::cout << "[PROT1] From user '" << username << "' - inner ciphertext size: "
-              << innerLen << " bytes\n";
-
-    for (int j = 0; j < maxClients; ++j)
-    {
-        int socketTarget = clientSocket[j];
-        if (socketTarget != 0 && socketTarget != currentSocket)
-        {
-            if(!sendWithLengthPrefix(socketTarget, encrypted))
-            {
-                std::string errWarning = "[Warning] Failed to forward to socket " + socketTarget + std::string("\n");
-                handleSystemCallError(errWarning);
-            }
-            else
-            {
-                std::cout << "[Forwarded] " << encrypted.size() << " bytes to socket " << socketTarget << "\n";
-            }
-        }
-    }
-}
-
-// Process Protocol when 3
-void Server::broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo)
-{        // if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
-
-    std::string frame = "PROT3\n" + messageType + "\n" + messageText;
-    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
-    if (encrypted.empty()) return;
-    
-    if (onlyTo == -1)
-    {
-        for (int j = 0; j < maxClients; ++j) {
-            int target = clientSocket[j];
-            if (onlyTo != -1 && target != onlyTo) continue;
-            sendWithLengthPrefix(target, encrypted);            
-        }
-    }
-    else
-    {
-        for (int j = 0; j < maxClients; ++j) {
-            int target = clientSocket[j];
-            // if (target <= 0) continue;
-
-            if (target == onlyTo)
-            {
-                sendWithLengthPrefix(target, encrypted);
-            }
-        }
-    }
-        
-}
-
-// Process Protocol when 4
-void Server::processProt4(int clientIndex, const std::string& plaintext)
-{
-    int sock = clientSocket[clientIndex];
-
-    auto parts = splitByNewline(plaintext);
-    if (parts.size() < 3) {
-        sendError(sock, "Malformed PROT4");
-        return;
-    }
-
-    std::string cmd = parts[1];
-    std::string username = parts[2];
-    std::string receivedKeyB64 = (parts.size() > 3) ? parts[3] : "";
-
-    // Basic validation
-    if (username.empty() || username.size() > 64 || receivedKeyB64.empty()) {
-        sendError(sock, "Invalid username or key");
-        return;
-    }
-
-    if (cmd == "CREATE")
-    {
-        if (accountsDb.createAccount(username, receivedKeyB64))
-        {
-            std::cout << "[Account created] " << username << "\n";
-            sendSuccess(sock, "Account created successfully");
-        } else {
-            sendError(sock, "Username already taken or creation failed");
-        }
-    } else if (cmd == "LOGIN")
-    {
-        if (accountsDb.validateLogin(username, receivedKeyB64))
-        {
-            std::cout << "[Login success] " << username << "\n";
-            sendSuccess(sock, "Login successful");
-        } else {
-            sendError(sock, "Username not found or incorrect key");
-        }
-    }
-    else {
-        sendError(sock, "Unknown PROT4 command");
-    }
-}
-
 // Send full user list to one specific client
 void Server::sendFullUserList(int targetSocket)
 {
@@ -398,39 +450,6 @@ void Server::sendFullUserList(int targetSocket)
 
     if (list.empty()) list = "";
     broadcastProt3(list, "userList", targetSocket);
-}
-
-// Main server loop
-void Server::run()
-{
-    while (true)
-    {
-        // clear socket set
-        FD_ZERO(&readfds);
-
-        // add mastersocket to socket set
-        FD_SET(masterSocket, &readfds);
-        max_socket = masterSocket;
-        
-        collectActiveClientSockets();
-        waitForServerActivity();
-        connectNewClientSocket();
-        handleClientActivity();
-    }
-}
-
-// Split a string based on new line marker
-std::vector<std::string> Server::splitByNewline(const std::string& s)
-{
-    std::vector<std::string> lines;
-    std::string line;
-    std::istringstream iss(s);
-    while (std::getline(iss, line)) {
-        if (!line.empty() || !lines.empty()) {
-            lines.push_back(std::move(line));
-        }
-    }
-    return lines;
 }
 
 // Disconnect client from server
@@ -463,35 +482,24 @@ void Server::disconnectClient(int index, const std::string& reason)
               << " (" << username << ")\n";
 }
 
-// Send Success Message using Protocol 4
-void Server::sendSuccess(int sock, const std::string& msg = "")
+void Server::closeClientSocket(int index)
 {
-    std::string frame = "PROT4\nSUCCESS";
-    if (!msg.empty()) frame += "\n" + msg;
-
-    std::string enc = FreiaEncryption::encryptData(frame, serverKey);
-    if (enc.empty()) return;
-
-    sendWithLengthPrefix(sock, enc);
+    close(clientSocket[index]);
+    clientSocket[index] = 0;
 }
 
-// Send error message using protocol 4
-void Server::sendError(int sock, const std::string& reason)
+void Server::collectActiveClientSockets()
 {
-    std::string frame = "PROT4\nFAIL\n" + reason;
+    std::lock_guard<std::mutex> lock(socketMutex);
+    for (int i = 0; i < maxClients; i++)
+    {
+        currentSocket = clientSocket[i];
 
-    std::string enc = FreiaEncryption::encryptData(frame, serverKey);
-    if (enc.empty()) return;
-
-    sendWithLengthPrefix(sock, enc);
-}
-
-// Send Package
-bool Server::sendWithLengthPrefix(int sock, const std::string& data)
-{
-    if (sock <= 0) return false;
-    uint32_t lenNet = htonl(static_cast<uint32_t>(data.size()));
-    if (send(sock, &lenNet, sizeof(lenNet), 0) != sizeof(lenNet)) return false;
-    if (send(sock, data.data(), data.size(), 0) != static_cast<ssize_t>(data.size())) return false;
-    return true;
+        // if valid socket, add to set
+        if (currentSocket > 0)
+            FD_SET(currentSocket, &readfds);
+        // highest file descriptor number, needed for select func
+        if (currentSocket > max_socket)
+            max_socket = currentSocket;
+    }
 }

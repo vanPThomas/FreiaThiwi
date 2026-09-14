@@ -1,7 +1,8 @@
 #include "AccountDatabase.h"
 #include <iostream>
 
-AccountDatabase::AccountDatabase(const std::string& dbPath) {
+AccountDatabase::AccountDatabase(const std::string& dbPath)
+{
     int rc = sqlite3_open(dbPath.c_str(), &db);
     if (rc != SQLITE_OK) {
         std::cerr << "Cannot open database: " << sqlite3_errmsg(db) << "\n";
@@ -12,18 +13,21 @@ AccountDatabase::AccountDatabase(const std::string& dbPath) {
 
     sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
 
-    if (!initializeSchema()) {
+    if (!initializeSchema())
+    {
         std::cerr << "Failed to initialize account database schema\n";
         sqlite3_close(db);
         db = nullptr;
     }
 }
 
-AccountDatabase::~AccountDatabase() {
+AccountDatabase::~AccountDatabase()
+{
     if (db) sqlite3_close(db);
 }
 
-bool AccountDatabase::initializeSchema() {
+bool AccountDatabase::initializeSchema()
+{
     const char* createTable = 
         "CREATE TABLE IF NOT EXISTS accounts ("
         "  username TEXT PRIMARY KEY,"
@@ -33,7 +37,8 @@ bool AccountDatabase::initializeSchema() {
     return execute(createTable);
 }
 
-bool AccountDatabase::execute(const std::string& sql) {
+bool AccountDatabase::execute(const std::string& sql)
+{
     std::lock_guard<std::mutex> lock(dbMutex);
     char* errMsg = nullptr;
     int rc = sqlite3_exec(db, sql.c_str(), nullptr, nullptr, &errMsg);
@@ -45,7 +50,8 @@ bool AccountDatabase::execute(const std::string& sql) {
     return true;
 }
 
-bool AccountDatabase::createAccount(const std::string& username, const std::string& keyBase64) {
+bool AccountDatabase::createAccount(const std::string& username, const std::string& keyBase64)
+{
     std::lock_guard<std::mutex> lock(dbMutex);
 
     sqlite3_stmt* stmt;
@@ -61,7 +67,8 @@ bool AccountDatabase::createAccount(const std::string& username, const std::stri
     return success;
 }
 
-std::optional<std::string> AccountDatabase::validateLogin(const std::string& username, const std::string& keyBase64) {
+std::optional<std::string> AccountDatabase::validateLogin(const std::string& username, const std::string& keyBase64)
+{
     std::lock_guard<std::mutex> lock(dbMutex);
 
     sqlite3_stmt* stmt;

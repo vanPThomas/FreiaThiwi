@@ -3,12 +3,24 @@
 
 // Server constructor
 Server::Server(int port, int maxClients, const std::string& password)
-    : maxClients(maxClients), PORT(port), serverPassword(password), accountsDb("accounts.db") {
+    : maxClients(maxClients), PORT(port), serverPassword(password), accountsDb("accounts.db")
+    {
         serverKey = FreiaEncryption::deriveKey(serverPassword);
         masterSocket = initializeServerSocket();
         clientSocket.assign(maxClients, 0);
         addrlen = sizeof(address);
         std::cout << "Waiting for connections ... \n";
+
+        ChatRoom room1("Test", "Test");
+        ChatRoom room2("Test2", "Test2");
+        
+        std::string room1name = room1.getChatRoomName();
+        std::string room2name = room2.getChatRoomName();
+        onlineRooms.push_back(room1name);
+        onlineRooms.push_back(room2name);
+
+        fakeDatabaseRooms.push_back(room1);
+        fakeDatabaseRooms.push_back(room2);
 }
 
 void Server::handleSystemCallError(std::string errorMsg)
@@ -95,7 +107,6 @@ bool Server::sendWithLengthPrefix(int sock, const std::string& data)
     if (send(sock, data.data(), data.size(), 0) != static_cast<ssize_t>(data.size())) return false;
     return true;
 }
-
 
 // ====================================
 // Protocol processing and creation
@@ -261,15 +272,23 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     auto parts = splitByNewline(plaintext);
 
     std::string cmd = parts[1];
-    std::string chatRoomName[2];
+    std::string chatRoomName = parts[2];
     std::string username = parts[3];
-    std::string receivedKeyB64 = (parts.size() > 3) ? parts[4] : "";
+    std::string receivedKeyB64 = (parts.size() > 4) ? parts[4] : "";
 
     if(cmd == "CREATE")
     {
+        ChatRoom newRoom(chatRoomName, receivedKeyB64);
+        fakeDatabaseRooms.push_back(newRoom);
+        onlineRooms.push_back(newRoom.getChatRoomName());
+        std::cout << "New Room Created\n";
 
+        for (const auto& [fd, name] : socketToUsername)
+        {
+            sendFullRoomList(fd);
+        }
     }
-    else if (cmd == "LOGIN")
+    else if (cmd == "CONNECT")
     {
 
     }
@@ -369,7 +388,8 @@ void Server::connectNewClientSocket()
         // 5. Send OK reply (encrypted)
         std::string okPlain = "PROT2\nWelcome " + username + "!";
         std::string okCipher = FreiaEncryption::encryptData(okPlain, serverKey);
-        if (okCipher.empty()) {
+        if (okCipher.empty())
+        {
             std::cerr << "[Critical] Failed to encrypt PROT2 reply\n";
             close(newSocket);
             socketToUsername.erase(newSocket);
@@ -389,8 +409,10 @@ void Server::connectNewClientSocket()
         bool added = false;
         {
             std::lock_guard<std::mutex> lock(socketMutex);
-            for (int i = 0; i < maxClients; ++i) {
-                if (clientSocket[i] == 0) {
+            for (int i = 0; i < maxClients; ++i)
+            {
+                if (clientSocket[i] == 0)
+                {
                     clientSocket[i] = newSocket;
                     std::cout << "Added authenticated client " << username 
                     << " at slot " << i << "\n";
@@ -400,12 +422,14 @@ void Server::connectNewClientSocket()
             }
             
         }
-        if (!added) {
+        if (!added)
+        {
             std::cout << "Server full - rejecting " << username << "\n";
             close(newSocket);
             socketToUsername.erase(newSocket);
         }
         sendFullUserList(newSocket);
+        sendFullRoomList(newSocket);
     }
 }
 
@@ -455,12 +479,19 @@ void Server::handleClientActivity()
 
         auto parts = splitByNewline(plaintext);
         std::string protocol = parts[0];
+        std::cout << protocol << "\n";
+
         if(protocol == "PROT1")
         {
             processProt1(i, encrypted, plaintext);
         }
-        else if (protocol == "PROT4") {
+        else if (protocol == "PROT4")
+        {
             processProt4(i, plaintext);
+        }
+        else if (protocol == "PROT5")
+        {
+            processProt5(i, plaintext);
         }
         else
         {
@@ -474,7 +505,8 @@ void Server::sendFullUserList(int targetSocket)
 {
     std::string list;
     {
-        for (const auto& [fd, name] : socketToUsername) {
+        for (const auto& [fd, name] : socketToUsername)
+        {
             if (!list.empty()) list += "\n";
             list += name;
         }
@@ -482,6 +514,22 @@ void Server::sendFullUserList(int targetSocket)
 
     if (list.empty()) list = "";
     broadcastProt3(list, "userList", targetSocket);
+}
+
+// Send full room list to one specific client
+void Server::sendFullRoomList(int targetSocket)
+{
+    std::string list;
+    {
+        for (auto name : onlineRooms)
+        {
+            if (!list.empty()) list += "\n";
+            list += name;
+        }
+    }
+
+    if (list.empty()) list = "";
+    broadcastProt3(list, "roomList", targetSocket);
 }
 
 // Disconnect client from server

@@ -15,6 +15,7 @@
 #include <mutex>
 #include <unordered_map>
 #include "AccountDatabase.h"
+#include "ChatRoom.h"
 
 class Server
 {
@@ -48,6 +49,7 @@ private:
     void connectNewClientSocket();
     void handleClientActivity();
     void sendFullUserList(int targetSocket);
+    void sendFullRoomList(int targetSocket);
     void disconnectClient(int index, const std::string& reason = "Unknown");
     void closeClientSocket(int index);
     void collectActiveClientSockets();
@@ -70,6 +72,9 @@ private:
     int masterSocket = -1;
 
     std::unordered_map<int, std::string> socketToUsername;
+    std::vector<std::string> onlineRooms;
+    std::vector<ChatRoom> roomsWithConnections;
+    std::vector<ChatRoom> fakeDatabaseRooms;
 
     std::mutex socketMutex;
 

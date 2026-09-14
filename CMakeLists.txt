@@ -18,6 +18,7 @@ add_executable(freia-thiwi
     src/FreiaEncryption.cpp
     src/server.cpp
     src/AccountDatabase.cpp
+    src/ChatRoom.cpp
 )
 
 target_include_directories(freia-thiwi PRIVATE include)

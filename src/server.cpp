@@ -110,9 +110,11 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
 
     std::string username = parts[1];
     size_t innerLen = 0;
-    try {
+    try
+    {
         innerLen = std::stoul(parts[2]);
-    } catch (...) {
+    } catch (...)
+    {
         disconnectClient(clientIndex, "[Protocol error] Invalid length field\n");
         return;
     }
@@ -150,15 +152,15 @@ void Server::processProt1(int clientIndex, const std::string& encrypted, const s
 
 // Process Protocol when 3
 void Server::broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo)
-{        // if (send(newSocket, &okLenNet, sizeof(okLenNet), 0) != sizeof(okLenNet) ||
-
+{
     std::string frame = "PROT3\n" + messageType + "\n" + messageText;
     std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
     if (encrypted.empty()) return;
     
     if (onlyTo == -1)
     {
-        for (int j = 0; j < maxClients; ++j) {
+        for (int j = 0; j < maxClients; ++j)
+        {
             int target = clientSocket[j];
             if (onlyTo != -1 && target != onlyTo) continue;
             sendWithLengthPrefix(target, encrypted);            
@@ -166,7 +168,8 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
     }
     else
     {
-        for (int j = 0; j < maxClients; ++j) {
+        for (int j = 0; j < maxClients; ++j)
+        {
             int target = clientSocket[j];
             // if (target <= 0) continue;
 
@@ -175,17 +178,17 @@ void Server::broadcastProt3(const std::string& messageText, const std::string& m
                 sendWithLengthPrefix(target, encrypted);
             }
         }
-    }
-        
+    } 
 }
 
-// Process Protocol when 4
+// Process Protocol when 4, account creation or login
 void Server::processProt4(int clientIndex, const std::string& plaintext)
 {
     int sock = clientSocket[clientIndex];
 
     auto parts = splitByNewline(plaintext);
-    if (parts.size() < 3) {
+    if (parts.size() < 3)
+    {
         sendError(sock, "Malformed PROT4");
         return;
     }
@@ -195,7 +198,8 @@ void Server::processProt4(int clientIndex, const std::string& plaintext)
     std::string receivedKeyB64 = (parts.size() > 3) ? parts[3] : "";
 
     // Basic validation
-    if (username.empty() || username.size() > 64 || receivedKeyB64.empty()) {
+    if (username.empty() || username.size() > 64 || receivedKeyB64.empty())
+    {
         sendError(sock, "Invalid username or key");
         return;
     }
@@ -206,7 +210,8 @@ void Server::processProt4(int clientIndex, const std::string& plaintext)
         {
             std::cout << "[Account created] " << username << "\n";
             sendSuccess(sock, "Account created successfully");
-        } else {
+        } else
+        {
             sendError(sock, "Username already taken or creation failed");
         }
     } else if (cmd == "LOGIN")
@@ -215,11 +220,13 @@ void Server::processProt4(int clientIndex, const std::string& plaintext)
         {
             std::cout << "[Login success] " << username << "\n";
             sendSuccess(sock, "Login successful");
-        } else {
+        } else
+        {
             sendError(sock, "Username not found or incorrect key");
         }
     }
-    else {
+    else
+    {
         sendError(sock, "Unknown PROT4 command");
     }
 }
@@ -245,6 +252,31 @@ void Server::sendError(int sock, const std::string& reason)
     if (enc.empty()) return;
 
     sendWithLengthPrefix(sock, enc);
+}
+
+// Process prot 5, room creation or login 
+void Server::processProt5(int clientIndex, const std::string& plaintext)
+{
+    int sock = clientSocket[clientIndex];
+    auto parts = splitByNewline(plaintext);
+
+    std::string cmd = parts[1];
+    std::string chatRoomName[2];
+    std::string username = parts[3];
+    std::string receivedKeyB64 = (parts.size() > 3) ? parts[4] : "";
+
+    if(cmd == "CREATE")
+    {
+
+    }
+    else if (cmd == "LOGIN")
+    {
+
+    }
+    else
+    {
+        sendError(sock, "Unknown PROT5 command");
+    }
 }
 
 // ====================================

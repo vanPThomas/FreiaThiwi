@@ -39,6 +39,7 @@ private:
     void processProt4(int clientIndex, const std::string& plaintext);
     void sendSuccess(int sock, const std::string& msg);
     void sendError(int sock, const std::string& reason);
+    void processProt5(int clientIndex, const std::string& plaintext);
 
     // ====================================
     // Client activity
@@ -50,8 +51,6 @@ private:
     void disconnectClient(int index, const std::string& reason = "Unknown");
     void closeClientSocket(int index);
     void collectActiveClientSockets();
-
-
 
     int maxClients;
     int PORT;
@@ -75,4 +74,7 @@ private:
     std::mutex socketMutex;
 
     AccountDatabase accountsDb;
+
+
+
 };

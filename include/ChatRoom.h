@@ -17,6 +17,8 @@ public:
     const std::vector<std::string> getChatRoomMessages() const { return chatMessages; }
     const std::string getChatRoomPassword() const { return password; }
     const std::vector<std::string> getConnectedUsers() const { return connectedUsers; }
+    const std::string getRoomCreator() const { return roomCreator; }
+    const std::string getRoomCreationTime() const {return roomCreationTime; }
     
     void addMessage(std::string message);
     void addConnectedUser(std::string user);

@@ -41,6 +41,7 @@ private:
     void sendSuccess(int sock, const std::string& msg);
     void sendError(int sock, const std::string& reason);
     void processProt5(int clientIndex, const std::string& plaintext);
+    void sendRoom(int clientIndex, ChatRoom room);
 
     // ====================================
     // Client activity

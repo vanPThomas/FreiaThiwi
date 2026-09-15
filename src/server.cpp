@@ -276,7 +276,9 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     std::string username = parts[3];
     std::string receivedKeyB64 = (parts.size() > 4) ? parts[4] : "";
 
-    if(cmd == "CREATE")
+    bool foundRoom = false;
+
+    if (cmd == "CREATE")
     {
         ChatRoom newRoom(chatRoomName, receivedKeyB64);
         fakeDatabaseRooms.push_back(newRoom);
@@ -290,12 +292,70 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     }
     else if (cmd == "CONNECT")
     {
-
+        // TODO: password check added when database is added
+        for (auto room : roomsWithConnections)
+        {
+            if (room.getChatRoomName() == chatRoomName)
+            {
+                room.addConnectedUser(username);
+                broadcastProt3("Connected to Room", "SUCCESS", clientIndex);
+                foundRoom = true;
+                return;
+            }
+        }
+        for (auto room : onlineRooms)
+        {
+            if (room == chatRoomName)
+            {
+                for (auto roomdb : fakeDatabaseRooms)
+                {
+                    if (roomdb.getChatRoomName() == chatRoomName)
+                    {
+                        roomdb.addConnectedUser(username);
+                        roomsWithConnections.push_back(roomdb);
+                        broadcastProt3("Connected to Room", "SUCCESS", clientIndex);
+                        foundRoom = true;
+                        return;
+                    }
+                }
+            }
+        }
     }
     else
     {
         sendError(sock, "Unknown PROT5 command");
     }
+
+    if (!foundRoom)
+    {
+        broadcastProt3("FAILED TO CONNECT! Unknown Room!", "FAIL", clientIndex);
+    }
+}
+
+void Server::sendRoom(int clientIndex, ChatRoom room)
+{
+    std::string frame = "PROT5\n";
+    std::string chatRoomName = room.getChatRoomName();
+    std::string password = room.getChatRoomPassword();
+    std::vector<std::string> chatMessages = room.getChatRoomMessages();
+    std::vector<std::string> connectedUsers = room.getConnectedUsers();
+    std::string roomCreator = room.getRoomCreator();
+    std::string roomCreationTime = room.getRoomCreationTime();
+
+    frame += "ROOM\n" + chatRoomName + "\n" + password + "\n" + "MESSAGES\n";
+    for (auto message : chatMessages)
+    {
+        frame += message + "\n";
+    }
+    frame += "USERS\n";
+    for (auto user : connectedUsers)
+    {
+        frame += user + "\n";
+    }
+
+    frame += "END\n" + roomCreator + "\n" + roomCreationTime + "\n";
+    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
+    sendWithLengthPrefix(clientIndex, encrypted);
 }
 
 // ====================================

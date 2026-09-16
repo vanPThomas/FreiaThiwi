@@ -277,14 +277,14 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     std::string receivedKeyB64 = (parts.size() > 4) ? parts[4] : "";
 
     bool foundRoom = false;
-
+    
     if (cmd == "CREATE")
     {
         ChatRoom newRoom(chatRoomName, receivedKeyB64);
         fakeDatabaseRooms.push_back(newRoom);
         onlineRooms.push_back(newRoom.getChatRoomName());
         std::cout << "New Room Created\n";
-
+        
         for (const auto& [fd, name] : socketToUsername)
         {
             sendFullRoomList(fd);
@@ -292,6 +292,7 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     }
     else if (cmd == "CONNECT")
     {
+        std::cout << "test1\n";
         // TODO: password check added when database is added
         for (auto room : roomsWithConnections)
         {

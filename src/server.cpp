@@ -553,7 +553,6 @@ void Server::handleClientActivity()
         else if (protocol == "PROT5")
         {
             processProt5(i, plaintext);
-            std::cout << "XXXXXXXXXXXXXXXXXXXXXx\n";
         }
         else
         {

@@ -292,14 +292,13 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     }
     else if (cmd == "CONNECT")
     {
-        std::cout << "test1\n";
         // TODO: password check added when database is added
         for (auto room : roomsWithConnections)
         {
             if (room.getChatRoomName() == chatRoomName)
             {
                 room.addConnectedUser(username);
-                broadcastProt3("Connected to Room", "SUCCESS", clientIndex);
+                broadcastProt3("Connected to Room", "SUCCESS", sock);
                 foundRoom = true;
                 return;
             }
@@ -314,7 +313,8 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                     {
                         roomdb.addConnectedUser(username);
                         roomsWithConnections.push_back(roomdb);
-                        broadcastProt3("Connected to Room", "SUCCESS", clientIndex);
+                        broadcastProt3("Connected to Room", "SUCCESS", sock);
+                        sendRoom(sock, roomdb);
                         foundRoom = true;
                         return;
                     }
@@ -553,6 +553,7 @@ void Server::handleClientActivity()
         else if (protocol == "PROT5")
         {
             processProt5(i, plaintext);
+            std::cout << "XXXXXXXXXXXXXXXXXXXXXx\n";
         }
         else
         {

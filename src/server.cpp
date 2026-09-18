@@ -322,6 +322,53 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
             }
         }
     }
+    else if (cmd == "MESSAGE")
+    {
+        auto parts = splitByNewline(plaintext);
+        std::string chatRoomName = parts[2];
+
+        size_t innerLen = 0;
+        try
+        {
+            innerLen = std::stoul(parts[3]);
+        } catch (...)
+        {
+            disconnectClient(clientIndex, "[Protocol error] Invalid length field\n");
+            return;
+        }
+        
+        if (innerLen == 0 || innerLen > plaintext.size())
+        {
+            handleSystemCallError("[Protocol error] Inner length out of range\n");
+            closeClientSocket(clientIndex);
+
+            return;
+        }
+
+        std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
+
+        std::cout << "[PROT5] From user '" << chatRoomName << "' - inner ciphertext size: " << innerLen << " bytes\n";
+
+        std::string allProt5Frame;
+        allProt5Frame += "PROT5\n";
+        allProt5Frame += "MESSAGE\n";
+        allProt5Frame += chatRoomName;
+        allProt5Frame += '\n';
+        allProt5Frame += innerCipher;
+
+        std::string encrypted = FreiaEncryption::encryptData(allProt5Frame, serverKey);
+
+        for (int j = 0; j < maxClients; ++j)
+        {
+            int target = clientSocket[j];
+            sendWithLengthPrefix(target, encrypted);            
+        }
+
+        for (auto room : roomsWithConnections)
+        {
+            room.addMessage(encrypted);
+        }
+    }
     else
     {
         sendError(sock, "Unknown PROT5 command");

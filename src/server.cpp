@@ -292,6 +292,7 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     }
     else if (cmd == "CONNECT")
     {
+        std::cout << "AAAAA\n";
         // TODO: password check added when database is added
         for (auto room : roomsWithConnections)
         {
@@ -321,6 +322,8 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                 }
             }
         }
+
+        std::cout << "BBBBBBBBB\n";
     }
     else if (cmd == "MESSAGE")
     {

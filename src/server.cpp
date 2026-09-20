@@ -383,6 +383,7 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     }
 }
 
+// Send room information to client
 void Server::sendRoom(int clientIndex, ChatRoom room)
 {
     std::string frame = "PROT5\n";
@@ -673,6 +674,7 @@ void Server::disconnectClient(int index, const std::string& reason)
               << " (" << username << ")\n";
 }
 
+// close client socket
 void Server::closeClientSocket(int index)
 {
     close(clientSocket[index]);

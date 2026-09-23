@@ -23,6 +23,7 @@ Server::Server(int port, int maxClients, const std::string& password)
         fakeDatabaseRooms.push_back(room2);
 }
 
+// System error fuction
 void Server::handleSystemCallError(std::string errorMsg)
 {
     std::cerr << "Server error on port " << PORT
@@ -30,6 +31,7 @@ void Server::handleSystemCallError(std::string errorMsg)
     exit(EXIT_FAILURE);
 }
 
+// Create server socket
 int Server::initializeServerSocket() 
 {
     std::lock_guard<std::mutex> lock(socketMutex);
@@ -681,6 +683,7 @@ void Server::closeClientSocket(int index)
     clientSocket[index] = 0;
 }
 
+// Collect sockets with active clients
 void Server::collectActiveClientSockets()
 {
     std::lock_guard<std::mutex> lock(socketMutex);

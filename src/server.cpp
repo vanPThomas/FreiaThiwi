@@ -303,9 +303,11 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                 room.addConnectedUser(username);
                 broadcastProt3("Connected to Room", "SUCCESS", sock);
                 foundRoom = true;
+                std::cout << "FOUND!\n";
                 return;
             }
         }
+        std::cout << "roomswithconnections done\n";
         for (auto room : onlineRooms)
         {
             if (room == chatRoomName)
@@ -319,13 +321,14 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                         broadcastProt3("Connected to Room", "SUCCESS", sock);
                         sendRoom(sock, roomdb);
                         foundRoom = true;
+                        std::cout << "FOUND2!\n";
                         return;
                     }
                 }
             }
         }
+        std::cout << "onlineRooms done\n";
 
-        std::cout << "BBBBBBBBB\n";
     }
     else if (cmd == "MESSAGE")
     {

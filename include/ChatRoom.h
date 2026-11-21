@@ -22,6 +22,7 @@ public:
     
     void addMessage(std::string message);
     void addConnectedUser(std::string user);
+    void removeConnectedUser(const std::string& user);
 
 private:
     std::string chatRoomName;

@@ -1,6 +1,7 @@
 #include "ChatRoom.h"
 
 #include <utility>
+#include <algorithm>
 
 ChatRoom::ChatRoom(std::string chatRoomName, std::vector<std::string> chatMessages)
     : chatRoomName(chatRoomName)
@@ -21,5 +22,13 @@ void ChatRoom::addMessage(std::string message)
 
 void ChatRoom::addConnectedUser(std::string user)
 {
-    connectedUsers.push_back(user);
+    if (std::find(connectedUsers.begin(), connectedUsers.end(), user) == connectedUsers.end())
+        connectedUsers.push_back(std::move(user));
+}
+
+void ChatRoom::removeConnectedUser(const std::string& user)
+{
+    connectedUsers.erase(
+        std::remove(connectedUsers.begin(), connectedUsers.end(), user),
+        connectedUsers.end());
 }

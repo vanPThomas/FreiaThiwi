@@ -291,17 +291,19 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
         {
             sendFullRoomList(fd);
         }
+        return; // CREATE does not have a CONNECT-style response.
     }
     else if (cmd == "CONNECT")
     {
         std::cout << "AAAAA\n";
         // TODO: password check added when database is added
-        for (auto room : roomsWithConnections)
+        for (auto& room : roomsWithConnections)
         {
             if (room.getChatRoomName() == chatRoomName)
             {
                 room.addConnectedUser(username);
                 broadcastProt3("Connected to Room", "SUCCESS", sock);
+                sendRoom(sock, room); // Required on repeat joins, too.
                 foundRoom = true;
                 std::cout << "FOUND!\n";
                 return;
@@ -372,19 +374,22 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
             sendWithLengthPrefix(target, encrypted);            
         }
 
-        for (auto room : roomsWithConnections)
+        for (auto& room : roomsWithConnections)
         {
-            room.addMessage(encrypted);
+            if (room.getChatRoomName() == chatRoomName)
+                room.addMessage(encrypted);
         }
+        return;
     }
     else
     {
         sendError(sock, "Unknown PROT5 command");
+        return;
     }
 
     if (!foundRoom)
     {
-        broadcastProt3("FAILED TO CONNECT! Unknown Room!", "FAIL", clientIndex);
+        broadcastProt3("FAILED TO CONNECT! Unknown Room!", "FAIL", sock);
     }
 }
 
@@ -665,6 +670,10 @@ void Server::disconnectClient(int index, const std::string& reason)
 
     std::string message = username + " disconnected.";
     std::string messageType = "userDisconnected";
+
+    // Remove the disconnected user from every active room.
+    for (auto& room : roomsWithConnections)
+        room.removeConnectedUser(username);
 
     // Close & clear
     closeClientSocket(index);

@@ -295,7 +295,6 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     }
     else if (cmd == "CONNECT")
     {
-        std::cout << "AAAAA\n";
         // TODO: password check added when database is added
         for (auto& room : roomsWithConnections)
         {
@@ -305,7 +304,6 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                 broadcastProt3("Connected to Room", "SUCCESS", sock);
                 sendRoom(sock, room); // Required on repeat joins, too.
                 foundRoom = true;
-                std::cout << "FOUND!\n";
                 return;
             }
         }
@@ -323,7 +321,6 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                         broadcastProt3("Connected to Room", "SUCCESS", sock);
                         sendRoom(sock, roomdb);
                         foundRoom = true;
-                        std::cout << "FOUND2!\n";
                         return;
                     }
                 }

@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include "AccountDatabase.h"
 #include "ChatRoom.h"
+#include <algorithm>
 
 class Server
 {
@@ -54,6 +55,8 @@ private:
     void disconnectClient(int index, const std::string& reason = "Unknown");
     void closeClientSocket(int index);
     void collectActiveClientSockets();
+
+    void broadcastRoomUsers(const ChatRoom& room);
 
     int maxClients;
     int PORT;

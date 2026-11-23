@@ -303,6 +303,10 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                 room.addConnectedUser(username);
                 broadcastProt3("Connected to Room", "SUCCESS", sock);
                 sendRoom(sock, room); // Required on repeat joins, too.
+
+                // Notify everybody in this room
+                broadcastRoomUsers(room);
+
                 foundRoom = true;
                 return;
             }
@@ -318,8 +322,13 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
                     {
                         roomdb.addConnectedUser(username);
                         roomsWithConnections.push_back(roomdb);
+
                         broadcastProt3("Connected to Room", "SUCCESS", sock);
                         sendRoom(sock, roomdb);
+
+                        // Broadcast using the stored room
+                        broadcastRoomUsers(roomsWithConnections.back());
+
                         foundRoom = true;
                         return;
                     }
@@ -670,7 +679,16 @@ void Server::disconnectClient(int index, const std::string& reason)
 
     // Remove the disconnected user from every active room.
     for (auto& room : roomsWithConnections)
+    {
+        const auto oldCount = room.getConnectedUsers().size();
+
         room.removeConnectedUser(username);
+
+        if (room.getConnectedUsers().size() != oldCount)
+        {
+            broadcastRoomUsers(room);
+        }
+    }
 
     // Close & clear
     closeClientSocket(index);
@@ -706,5 +724,37 @@ void Server::collectActiveClientSockets()
         // highest file descriptor number, needed for select func
         if (currentSocket > max_socket)
             max_socket = currentSocket;
+    }
+}
+
+
+// ========================= Other ======================
+
+void Server::broadcastRoomUsers(const ChatRoom& room)
+{
+    const auto users = room.getConnectedUsers();
+
+    std::string frame = "PROT5\nUSERS\n";
+    frame += room.getChatRoomName() + "\n";
+    frame += std::to_string(users.size()) + "\n";
+
+    for (const auto& user : users)
+    {
+        frame += user + "\n";
+    }
+
+    std::string encrypted =
+        FreiaEncryption::encryptData(frame, serverKey);
+
+    if (encrypted.empty()) return;
+
+    // Send only to users in this room
+    for (const auto& [fd, username] : socketToUsername)
+    {
+        if (std::find(users.begin(), users.end(), username)
+            != users.end())
+        {
+            sendWithLengthPrefix(fd, encrypted);
+        }
     }
 }

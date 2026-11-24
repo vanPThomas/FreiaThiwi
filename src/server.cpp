@@ -394,9 +394,7 @@ void Server::processProt5(int clientIndex, const std::string& plaintext)
     }
 
     if (!foundRoom)
-    {
         broadcastProt3("FAILED TO CONNECT! Unknown Room!", "FAIL", sock);
-    }
 }
 
 // Send room information to client
@@ -739,9 +737,7 @@ void Server::broadcastRoomUsers(const ChatRoom& room)
     frame += std::to_string(users.size()) + "\n";
 
     for (const auto& user : users)
-    {
         frame += user + "\n";
-    }
 
     std::string encrypted =
         FreiaEncryption::encryptData(frame, serverKey);
@@ -751,10 +747,8 @@ void Server::broadcastRoomUsers(const ChatRoom& room)
     // Send only to users in this room
     for (const auto& [fd, username] : socketToUsername)
     {
-        if (std::find(users.begin(), users.end(), username)
-            != users.end())
-        {
+        if (std::find(users.begin(), users.end(), username) != users.end())
             sendWithLengthPrefix(fd, encrypted);
-        }
+        
     }
 }

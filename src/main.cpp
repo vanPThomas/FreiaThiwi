@@ -11,7 +11,7 @@ int main()
     int maxClients;
     std::string serverPassword;
 
-    std::cout << "Enter Port (1024–65535): ";
+    std::cout << "Enter Port (1024-65535): ";
     std::cin >> PORT;
     if (PORT < 1024 || PORT > 65535) {
         std::cerr << "Invalid port\n";

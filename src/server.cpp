@@ -1,26 +1,20 @@
 #include "server.h"
+#include <cerrno>
+#include <cctype>
 
 
 // Server constructor
 Server::Server(int port, int maxClients, const std::string& password)
-    : maxClients(maxClients), PORT(port), serverPassword(password), accountsDb("accounts.db")
-    {
-        serverKey = FreiaEncryption::deriveKey(serverPassword);
-        masterSocket = initializeServerSocket();
-        clientSocket.assign(maxClients, 0);
-        addrlen = sizeof(address);
-        std::cout << "Waiting for connections ... \n";
-
-        ChatRoom room1("Test", "Test");
-        ChatRoom room2("Test2", "Test2");
-        
-        std::string room1name = room1.getChatRoomName();
-        std::string room2name = room2.getChatRoomName();
-        onlineRooms.push_back(room1name);
-        onlineRooms.push_back(room2name);
-
-        fakeDatabaseRooms.push_back(room1);
-        fakeDatabaseRooms.push_back(room2);
+    : maxClients(maxClients), PORT(port), serverPassword(password),
+      accountsDb("accounts.db"), roomsDb("accounts.db")
+{
+    if (!roomsDb.ready()) handleSystemCallError("Room database initialization failed");
+    serverKey = FreiaEncryption::deriveKey(serverPassword);
+    masterSocket = initializeServerSocket();
+    clientSocket.assign(maxClients, 0);
+    addrlen = sizeof(address);
+    std::cout << "Loaded " << roomsDb.roomNames().size()
+              << " persisted chatrooms; waiting for connections...\n";
 }
 
 // System error fuction
@@ -100,148 +94,133 @@ std::vector<std::string> Server::splitByNewline(const std::string& s)
     return lines;
 }
 
-// Send Package
+// Send all bytes, including when send() writes only a prefix.
 bool Server::sendWithLengthPrefix(int sock, const std::string& data)
 {
-    if (sock <= 0) return false;
+    if (sock <= 0 || data.empty() || data.size() > MAX_PACKET_SIZE) return false;
     uint32_t lenNet = htonl(static_cast<uint32_t>(data.size()));
-    if (send(sock, &lenNet, sizeof(lenNet), 0) != sizeof(lenNet)) return false;
-    if (send(sock, data.data(), data.size(), 0) != static_cast<ssize_t>(data.size())) return false;
+    auto sendAll = [sock](const char* ptr, size_t length) {
+        size_t sent = 0;
+        while (sent < length) {
+            ssize_t n = send(sock, ptr + sent, length - sent, MSG_NOSIGNAL);
+            if (n < 0 && errno == EINTR) continue;
+            if (n <= 0) return false;
+            sent += static_cast<size_t>(n);
+        }
+        return true;
+    };
+    return sendAll(reinterpret_cast<const char*>(&lenNet), sizeof(lenNet)) &&
+           sendAll(data.data(), data.size());
+}
+
+bool Server::sendEncrypted(int socket, const std::string& frame)
+{
+    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
+    return !encrypted.empty() && sendWithLengthPrefix(socket, encrypted);
+}
+
+bool Server::validProtocolName(const std::string& value, size_t limit)
+{
+    if (value.empty() || value.size() > limit || value.front() == ' ' || value.back() == ' ')
+        return false;
+    for (unsigned char c : value)
+        if (c < 32 || c == 127) return false;
     return true;
+}
+
+bool Server::validBase64(const std::string& value, size_t maxSize)
+{
+    if (value.empty() || value.size() > maxSize || value.size() % 4 != 0) return false;
+    size_t equals = 0;
+    for (size_t i = 0; i < value.size(); ++i) {
+        char c = value[i];
+        if (c == '=') {
+            if (i < value.size() - 2) return false;
+            ++equals;
+        } else if (equals || !((c >= 'A' && c <= 'Z') ||
+                                (c >= 'a' && c <= 'z') ||
+                                (c >= '0' && c <= '9') || c == '+' || c == '/')) {
+            return false;
+        }
+    }
+    return equals <= 2;
 }
 
 // ====================================
 // Protocol processing and creation
 // ====================================
 
-// Process Protocol when One
+// Relay legacy direct messages. Reject invalid frames without killing the server.
 void Server::processProt1(int clientIndex, const std::string& encrypted, const std::string& plaintext)
 {
-    int currentSocket = clientSocket[clientIndex];
-
-    auto parts = splitByNewline(plaintext);
-
-    std::string username = parts[1];
-    size_t innerLen = 0;
-    try
-    {
-        innerLen = std::stoul(parts[2]);
-    } catch (...)
-    {
-        disconnectClient(clientIndex, "[Protocol error] Invalid length field\n");
-        return;
-    }
-    
-    if (innerLen == 0 || innerLen > plaintext.size())
-    {
-        handleSystemCallError("[Protocol error] Inner length out of range\n");
-        closeClientSocket(clientIndex);
-
-        return;
-    }
-
-    std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
-
-    std::cout << "[PROT1] From user '" << username << "' - inner ciphertext size: "
-              << innerLen << " bytes\n";
-
-    for (int j = 0; j < maxClients; ++j)
-    {
-        int socketTarget = clientSocket[j];
-        if (socketTarget != 0 && socketTarget != currentSocket)
-        {
-            if(!sendWithLengthPrefix(socketTarget, encrypted))
-            {
-                std::string errWarning = "[Warning] Failed to forward to socket " + socketTarget + std::string("\n");
-                handleSystemCallError(errWarning);
-            }
-            else
-            {
-                std::cout << "[Forwarded] " << encrypted.size() << " bytes to socket " << socketTarget << "\n";
-            }
-        }
-    }
+    int sender = clientSocket[clientIndex];
+    if (socketToUsername.find(sender) == socketToUsername.end()) return;
+    auto first = plaintext.find('\n');
+    auto second = plaintext.find('\n', first == std::string::npos ? first : first + 1);
+    auto third = plaintext.find('\n', second == std::string::npos ? second : second + 1);
+    if (second == std::string::npos || third == std::string::npos) return;
+    if (plaintext.substr(first + 1, second - first - 1) != socketToUsername[sender]) return;
+    size_t len = 0;
+    try {
+        auto sizeString = plaintext.substr(second + 1, third - second - 1);
+        size_t pos = 0;
+        len = std::stoul(sizeString, &pos);
+        if (pos != sizeString.size()) return;
+    } catch (...) { return; }
+    if (len == 0 || len != plaintext.size() - third - 1) return;
+    for (int target : clientSocket)
+        if (target > 0 && target != sender && socketToUsername.count(target))
+            sendWithLengthPrefix(target, encrypted);
 }
 
-// Process Protocol when 3
+// Protocol 3 server notices.
 void Server::broadcastProt3(const std::string& messageText, const std::string& messageType, int onlyTo)
 {
-    std::string frame = "PROT3\n" + messageType + "\n" + messageText;
-    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
+    const std::string encrypted = FreiaEncryption::encryptData(
+        "PROT3\n" + messageType + "\n" + messageText, serverKey);
     if (encrypted.empty()) return;
-    
-    if (onlyTo == -1)
-    {
-        for (int j = 0; j < maxClients; ++j)
-        {
-            int target = clientSocket[j];
-            if (onlyTo != -1 && target != onlyTo) continue;
-            sendWithLengthPrefix(target, encrypted);            
-        }
+    for (int target : clientSocket) {
+        if (target <= 0) continue;
+        if (onlyTo != -1 && target != onlyTo) continue;
+        if (onlyTo == -1 && socketToUsername.count(target) == 0) continue;
+        sendWithLengthPrefix(target, encrypted);
     }
-    else
-    {
-        for (int j = 0; j < maxClients; ++j)
-        {
-            int target = clientSocket[j];
-            // if (target <= 0) continue;
-
-            if (target == onlyTo)
-            {
-                sendWithLengthPrefix(target, encrypted);
-            }
-        }
-    } 
 }
 
-// Process Protocol when 4, account creation or login
+// Account authentication: the PROT2 username is only a claim, not authentication.
 void Server::processProt4(int clientIndex, const std::string& plaintext)
 {
     int sock = clientSocket[clientIndex];
-
-    auto parts = splitByNewline(plaintext);
-    if (parts.size() < 3)
-    {
-        sendError(sock, "Malformed PROT4");
+    const auto parts = splitByNewline(plaintext);
+    if (parts.size() != 4 || !validProtocolName(parts[2], 32) ||
+        !validBase64(parts[3], 128)) {
+        sendError(sock, "Malformed account request");
         return;
     }
-
-    std::string cmd = parts[1];
-    std::string username = parts[2];
-    std::string receivedKeyB64 = (parts.size() > 3) ? parts[3] : "";
-
-    // Basic validation
-    if (username.empty() || username.size() > 64 || receivedKeyB64.empty())
-    {
-        sendError(sock, "Invalid username or key");
+    const std::string& command = parts[1];
+    const std::string& username = parts[2];
+    if (handshakeUsernames[sock] != username) {
+        sendError(sock, "Account username must match handshake");
         return;
     }
-
-    if (cmd == "CREATE")
-    {
-        if (accountsDb.createAccount(username, receivedKeyB64))
-        {
-            std::cout << "[Account created] " << username << "\n";
-            sendSuccess(sock, "Account created successfully");
-        } else
-        {
-            sendError(sock, "Username already taken or creation failed");
-        }
-    } else if (cmd == "LOGIN")
-    {
-        if (accountsDb.validateLogin(username, receivedKeyB64))
-        {
-            std::cout << "[Login success] " << username << "\n";
-            sendSuccess(sock, "Login successful");
-        } else
-        {
-            sendError(sock, "Username not found or incorrect key");
-        }
+    if (socketToUsername.count(sock)) {
+        sendError(sock, "Already logged in");
+        return;
     }
-    else
-    {
-        sendError(sock, "Unknown PROT4 command");
+    bool success = false;
+    if (command == "CREATE") success = accountsDb.createAccount(username, parts[3]);
+    else if (command == "LOGIN") success = accountsDb.validateLogin(username, parts[3]).has_value();
+    else { sendError(sock, "Unknown account command"); return; }
+    if (!success) {
+        sendError(sock, "Account already exists or credentials invalid");
+        return;
     }
+    socketToUsername[sock] = username;
+    sendSuccess(sock, command == "CREATE" ? "Account created successfully" : "Login successful");
+    broadcastProt3(username, "userJoined");
+    sendFullUserList(sock);
+    sendFullRoomList(sock);
+    std::cout << "[Account authenticated] " << username << "\n";
 }
 
 // Send Success Message using Protocol 4
@@ -267,161 +246,138 @@ void Server::sendError(int sock, const std::string& reason)
     sendWithLengthPrefix(sock, enc);
 }
 
-// Process prot 5, room creation or login 
+// Room-specific errors are distinct from account login errors.
+void Server::sendProt5Error(int socket, const std::string& room, const std::string& reason)
+{
+    sendEncrypted(socket, "PROT5\nERROR\n" + room + "\n" + reason);
+}
+
+void Server::joinRoom(int socket, const std::string& name, const std::string& username,
+                      const std::string& authTokenBase64)
+{
+    if (!roomsDb.checkPassword(name, authTokenBase64)) {
+        sendProt5Error(socket, name, "Unknown room or incorrect password");
+        return;
+    }
+    if (!roomsDb.recordMembership(name, username)) {
+        sendProt5Error(socket, name, "Could not record room membership");
+        return;
+    }
+    auto metadata = roomsDb.findRoom(name);
+    if (!metadata) { sendProt5Error(socket, name, "Room not found"); return; }
+
+    auto roomIt = std::find_if(roomsWithConnections.begin(), roomsWithConnections.end(),
+        [&](const ChatRoom& room) { return room.getChatRoomName() == name; });
+    if (roomIt == roomsWithConnections.end()) {
+        roomsWithConnections.emplace_back(name, std::vector<std::string>{});
+        roomIt = roomsWithConnections.end() - 1;
+        roomIt->setMetadata(metadata->creator, metadata->createdAt);
+    }
+    roomSockets[name].insert(socket);
+    refreshRoomUsers(name);
+    // Ordering: ROOM must arrive before USERS or any history MESSAGE.
+    sendRoom(socket, *roomIt);
+    for (const auto& history : roomsDb.recentMessages(name))
+        sendEncrypted(socket, "PROT5\nMESSAGE\n" + name + "\n" + history);
+    broadcastRoomUsers(*roomIt);
+}
+
+void Server::leaveRoom(int socket, const std::string& name)
+{
+    auto it = roomSockets.find(name);
+    if (it == roomSockets.end() || it->second.erase(socket) == 0) {
+        sendProt5Error(socket, name, "Not connected to room");
+        return;
+    }
+    if (it->second.empty()) roomSockets.erase(it);
+    // LEFT is sent before users broadcast; only current members receive USERS.
+    sendEncrypted(socket, "PROT5\nLEFT\n" + name);
+    refreshRoomUsers(name);
+    for (const auto& room : roomsWithConnections)
+        if (room.getChatRoomName() == name) { broadcastRoomUsers(room); break; }
+}
+
+void Server::refreshRoomUsers(const std::string& name)
+{
+    auto room = std::find_if(roomsWithConnections.begin(), roomsWithConnections.end(),
+        [&](const ChatRoom& r) { return r.getChatRoomName() == name; });
+    if (room == roomsWithConnections.end()) return;
+    std::vector<std::string> users;
+    auto members = roomSockets.find(name);
+    if (members != roomSockets.end())
+        for (int fd : members->second) {
+            auto auth = socketToUsername.find(fd);
+            if (auth != socketToUsername.end() &&
+                std::find(users.begin(), users.end(), auth->second) == users.end())
+                users.push_back(auth->second);
+        }
+    std::sort(users.begin(), users.end());
+    room->setConnectedUsers(std::move(users));
+}
+
 void Server::processProt5(int clientIndex, const std::string& plaintext)
 {
     int sock = clientSocket[clientIndex];
-    auto parts = splitByNewline(plaintext);
-
-    std::string cmd = parts[1];
-    std::string chatRoomName = parts[2];
-    std::string username = parts[3];
-    std::string receivedKeyB64 = (parts.size() > 4) ? parts[4] : "";
-
-    bool foundRoom = false;
-    
-    if (cmd == "CREATE")
-    {
-        ChatRoom newRoom(chatRoomName, receivedKeyB64);
-        fakeDatabaseRooms.push_back(newRoom);
-        onlineRooms.push_back(newRoom.getChatRoomName());
-        std::cout << "New Room Created\n";
-        
-        for (const auto& [fd, name] : socketToUsername)
-        {
-            sendFullRoomList(fd);
-        }
-        return; // CREATE does not have a CONNECT-style response.
+    auto auth = socketToUsername.find(sock);
+    if (auth == socketToUsername.end()) {
+        sendProt5Error(sock, "-", "Log in before using chatrooms");
+        return;
     }
-    else if (cmd == "CONNECT")
-    {
-        // TODO: password check added when database is added
-        for (auto& room : roomsWithConnections)
-        {
-            if (room.getChatRoomName() == chatRoomName)
-            {
-                room.addConnectedUser(username);
-                broadcastProt3("Connected to Room", "SUCCESS", sock);
-                sendRoom(sock, room); // Required on repeat joins, too.
-
-                // Notify everybody in this room
-                broadcastRoomUsers(room);
-
-                foundRoom = true;
+    auto parts = splitByNewline(plaintext);
+    if (parts.size() < 3 || !validProtocolName(parts[2], 32)) {
+        sendProt5Error(sock, "-", "Malformed room request");
+        return;
+    }
+    const std::string& command = parts[1];
+    const std::string& name = parts[2];
+    if (command == "CREATE" || command == "CONNECT") {
+        if (parts.size() != 5 || parts[3] != auth->second ||
+            !validBase64(parts[4], 44) || parts[4].size() != 44) {
+            sendProt5Error(sock, name, "Malformed room credentials");
+            return;
+        }
+        if (command == "CREATE") {
+            if (!roomsDb.createRoom(name, auth->second, parts[4])) {
+                sendProt5Error(sock, name, "Room already exists or database error");
                 return;
             }
-        }
-        std::cout << "roomswithconnections done\n";
-        for (auto room : onlineRooms)
-        {
-            if (room == chatRoomName)
-            {
-                for (auto roomdb : fakeDatabaseRooms)
-                {
-                    if (roomdb.getChatRoomName() == chatRoomName)
-                    {
-                        roomdb.addConnectedUser(username);
-                        roomsWithConnections.push_back(roomdb);
-
-                        broadcastProt3("Connected to Room", "SUCCESS", sock);
-                        sendRoom(sock, roomdb);
-
-                        // Broadcast using the stored room
-                        broadcastRoomUsers(roomsWithConnections.back());
-
-                        foundRoom = true;
-                        return;
-                    }
-                }
-            }
-        }
-        std::cout << "onlineRooms done\n";
-
-    }
-    else if (cmd == "MESSAGE")
-    {
-        auto parts = splitByNewline(plaintext);
-        std::string chatRoomName = parts[2];
-
-        size_t innerLen = 0;
-        try
-        {
-            innerLen = std::stoul(parts[3]);
-        } catch (...)
-        {
-            disconnectClient(clientIndex, "[Protocol error] Invalid length field\n");
-            return;
-        }
-        
-        if (innerLen == 0 || innerLen > plaintext.size())
-        {
-            handleSystemCallError("[Protocol error] Inner length out of range\n");
-            closeClientSocket(clientIndex);
-
-            return;
-        }
-
-        std::string innerCipher = plaintext.substr(plaintext.size() - innerLen);
-
-        std::cout << "[PROT5] From user '" << chatRoomName << "' - inner ciphertext size: " << innerLen << " bytes\n";
-
-        std::string allProt5Frame;
-        allProt5Frame += "PROT5\n";
-        allProt5Frame += "MESSAGE\n";
-        allProt5Frame += chatRoomName;
-        allProt5Frame += '\n';
-        allProt5Frame += innerCipher;
-
-        std::string encrypted = FreiaEncryption::encryptData(allProt5Frame, serverKey);
-
-        for (int j = 0; j < maxClients; ++j)
-        {
-            int target = clientSocket[j];
-            sendWithLengthPrefix(target, encrypted);            
-        }
-
-        for (auto& room : roomsWithConnections)
-        {
-            if (room.getChatRoomName() == chatRoomName)
-                room.addMessage(encrypted);
-        }
+            // Creators automatically become connected members.
+            joinRoom(sock, name, auth->second, parts[4]);
+            for (const auto& [fd, user] : socketToUsername) sendFullRoomList(fd);
+        } else joinRoom(sock, name, auth->second, parts[4]);
         return;
     }
-    else
-    {
-        sendError(sock, "Unknown PROT5 command");
+    if (command == "LEAVE") {
+        if (parts.size() != 3) { sendProt5Error(sock, name, "Malformed leave request"); return; }
+        leaveRoom(sock, name);
         return;
     }
-
-    if (!foundRoom)
-        broadcastProt3("FAILED TO CONNECT! Unknown Room!", "FAIL", sock);
+    if (command == "MESSAGE") {
+        if (parts.size() != 4 || !validBase64(parts[3], 32 * 1024)) {
+            sendProt5Error(sock, name, "Malformed encrypted message"); return;
+        }
+        auto it = roomSockets.find(name);
+        if (it == roomSockets.end() || !it->second.count(sock)) {
+            sendProt5Error(sock, name, "Join room before sending messages"); return;
+        }
+        if (!roomsDb.saveMessage(name, auth->second, parts[3])) {
+            sendProt5Error(sock, name, "Could not save encrypted message"); return;
+        }
+        const std::string frame = "PROT5\nMESSAGE\n" + name + "\n" + parts[3];
+        for (int fd : it->second) sendEncrypted(fd, frame);
+        return;
+    }
+    sendProt5Error(sock, name, "Unknown room command");
 }
 
-// Send room information to client
-void Server::sendRoom(int clientIndex, ChatRoom room)
+// ROOM is metadata only. History arrives as binary-safe base64 MESSAGE packets.
+void Server::sendRoom(int socket, const ChatRoom& room)
 {
-    std::string frame = "PROT5\n";
-    std::string chatRoomName = room.getChatRoomName();
-    std::string password = room.getChatRoomPassword();
-    std::vector<std::string> chatMessages = room.getChatRoomMessages();
-    std::vector<std::string> connectedUsers = room.getConnectedUsers();
-    std::string roomCreator = room.getRoomCreator();
-    std::string roomCreationTime = room.getRoomCreationTime();
-
-    frame += "ROOM\n" + chatRoomName + "\n" + password + "\n" + "MESSAGES\n";
-    for (auto message : chatMessages)
-    {
-        frame += message + "\n";
-    }
-    frame += "USERS\n";
-    for (auto user : connectedUsers)
-    {
-        frame += user + "\n";
-    }
-
-    frame += "END\n" + roomCreator + "\n" + roomCreationTime + "\n";
-    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
-    sendWithLengthPrefix(clientIndex, encrypted);
+    std::string frame = "PROT5\nROOM\n" + room.getChatRoomName() +
+        "\n-\nMESSAGES\nUSERS\n";
+    for (const auto& user : room.getConnectedUsers()) frame += user + "\n";
+    frame += "END\n" + room.getRoomCreator() + "\n" + room.getRoomCreationTime() + "\n";
+    sendEncrypted(socket, frame);
 }
 
 // ====================================
@@ -438,6 +394,12 @@ void Server::connectNewClientSocket()
             handleSystemCallError("accept failed");
             return;
         }
+
+        // Avoid holding the single-threaded event loop forever on an incomplete
+        // handshake, partial frame, or peer that stops receiving.
+        timeval networkTimeout{10, 0};
+        setsockopt(newSocket, SOL_SOCKET, SO_RCVTIMEO, &networkTimeout, sizeof(networkTimeout));
+        setsockopt(newSocket, SOL_SOCKET, SO_SNDTIMEO, &networkTimeout, sizeof(networkTimeout));
 
         std::string clientIp = inet_ntoa(address.sin_addr);
         int clientPort = ntohs(address.sin_port);
@@ -502,13 +464,9 @@ void Server::connectNewClientSocket()
 
         // SUCCESS: authenticated & username known
 
-        // Store username immediately
-        {
-            std::lock_guard<std::mutex> lock(socketMutex);
-            socketToUsername[newSocket] = username;
-        }
+        handshakeUsernames[newSocket] = username;
 
-        std::cout << "Authenticated: " << username << " from " 
+        std::cout << "Handshake accepted: " << username << " from "
                 << clientIp << ":" << clientPort << " (fd=" << newSocket << ")\n";
 
         // 5. Send OK reply (encrypted)
@@ -518,7 +476,7 @@ void Server::connectNewClientSocket()
         {
             std::cerr << "[Critical] Failed to encrypt PROT2 reply\n";
             close(newSocket);
-            socketToUsername.erase(newSocket);
+            handshakeUsernames.erase(newSocket);
             return;
         }
 
@@ -526,12 +484,10 @@ void Server::connectNewClientSocket()
         {
             std::cout << "Failed to send OK reply to " << username << "\n";
             close(newSocket);
-            socketToUsername.erase(newSocket);
+            handshakeUsernames.erase(newSocket);
             return;
         }
 
-        broadcastProt3(username, "userJoined");
-        
         bool added = false;
         {
             std::lock_guard<std::mutex> lock(socketMutex);
@@ -552,10 +508,9 @@ void Server::connectNewClientSocket()
         {
             std::cout << "Server full - rejecting " << username << "\n";
             close(newSocket);
-            socketToUsername.erase(newSocket);
+            handshakeUsernames.erase(newSocket);
+            return;
         }
-        sendFullUserList(newSocket);
-        sendFullRoomList(newSocket);
     }
 }
 
@@ -571,7 +526,7 @@ void Server::handleClientActivity()
 
         uint32_t packetLengthNet = 0;
         int r = recv(currentSocket, &packetLengthNet, sizeof(packetLengthNet), MSG_WAITALL);
-        if (r <= 0)
+        if (r != static_cast<int>(sizeof(packetLengthNet)))
         {
             getpeername(currentSocket, (struct sockaddr*)&address, (socklen_t*)&addrlen);
             std::cout << "Host disconnected! ip: " << inet_ntoa(address.sin_addr)
@@ -583,14 +538,14 @@ void Server::handleClientActivity()
         uint32_t packetLength = ntohl(packetLengthNet);
         if (packetLength == 0 || packetLength > MAX_PACKET_SIZE)
         {
-            std::string errWarning = "[Warning] Invalid length: " + packetLength + std::string("\n");
+            std::string errWarning = "[Warning] Invalid length: " + std::to_string(packetLength) + "\n";
             disconnectClient(i, errWarning);
             continue;
         }
 
         std::string encrypted(packetLength, '\0');
         r = recv(currentSocket, encrypted.data(), packetLength, MSG_WAITALL);
-        if (r <= 0)
+        if (r != static_cast<int>(packetLength))
         {
             disconnectClient(i, "[Error] Failed to read payload\n");
             continue;
@@ -604,6 +559,7 @@ void Server::handleClientActivity()
         }
 
         auto parts = splitByNewline(plaintext);
+        if (parts.empty()) { disconnectClient(i, "Empty protocol frame"); continue; }
         std::string protocol = parts[0];
         std::cout << protocol << "\n";
 
@@ -621,7 +577,7 @@ void Server::handleClientActivity()
         }
         else
         {
-            handleSystemCallError("[Protocol error] Malformed or missing Protocol1\n");
+            std::cerr << "[Protocol error] Unknown protocol from client\n";
         }
     }
 }
@@ -642,63 +598,51 @@ void Server::sendFullUserList(int targetSocket)
     broadcastProt3(list, "userList", targetSocket);
 }
 
-// Send full room list to one specific client
+// Names are persisted in SQLite and remain available after server restarts.
 void Server::sendFullRoomList(int targetSocket)
 {
     std::string list;
-    {
-        for (auto name : onlineRooms)
-        {
-            if (!list.empty()) list += "\n";
-            list += name;
-        }
+    for (const auto& name : roomsDb.roomNames()) {
+        if (!list.empty()) list += "\n";
+        list += name;
     }
-
-    if (list.empty()) list = "";
     broadcastProt3(list, "roomList", targetSocket);
 }
 
-// Disconnect client from server
 void Server::disconnectClient(int index, const std::string& reason)
 {
-    int victimFd = clientSocket[index];
-
-    std::string username = "Unknown";
-    {
-        auto it = socketToUsername.find(victimFd);
-        if (it != socketToUsername.end()) {
-            username = it->second;
-            socketToUsername.erase(it);
-        }
+    int fd = clientSocket[index];
+    if (fd <= 0) return;
+    std::string name;
+    auto account = socketToUsername.find(fd);
+    if (account != socketToUsername.end()) {
+        name = account->second;
+        socketToUsername.erase(account);
     }
-
-    std::string message = username + " disconnected.";
-    std::string messageType = "userDisconnected";
-
-    // Remove the disconnected user from every active room.
-    for (auto& room : roomsWithConnections)
-    {
-        const auto oldCount = room.getConnectedUsers().size();
-
-        room.removeConnectedUser(username);
-
-        if (room.getConnectedUsers().size() != oldCount)
-        {
-            broadcastRoomUsers(room);
-        }
+    handshakeUsernames.erase(fd);
+    std::vector<std::string> affected;
+    for (auto it = roomSockets.begin(); it != roomSockets.end();) {
+        if (it->second.erase(fd)) affected.push_back(it->first);
+        if (it->second.empty()) it = roomSockets.erase(it);
+        else ++it;
     }
-
-    // Close & clear
     closeClientSocket(index);
-    
-    broadcastProt3(message, messageType);
-    broadcastProt3(username, "userLeft");
-
-    // Log last
-    getpeername(victimFd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
-    std::cerr << "Client disconnected (" << reason << "): "
-              << inet_ntoa(address.sin_addr) << ":" << ntohs(address.sin_port)
-              << " (" << username << ")\n";
+    for (const auto& roomName : affected) {
+        refreshRoomUsers(roomName);
+        for (const auto& room : roomsWithConnections)
+            if (room.getChatRoomName() == roomName) { broadcastRoomUsers(room); break; }
+    }
+    if (!name.empty()) {
+        bool anotherSession = false;
+        for (const auto& entry : socketToUsername)
+            if (entry.second == name) { anotherSession = true; break; }
+        if (!anotherSession) {
+            broadcastProt3(name + " disconnected.", "userDisconnected");
+            broadcastProt3(name, "userLeft");
+        }
+    }
+    std::cerr << "Client disconnected (" << reason << "): fd=" << fd
+              << " user=" << (name.empty() ? "unauthenticated" : name) << "\n";
 }
 
 // close client socket
@@ -730,25 +674,13 @@ void Server::collectActiveClientSockets()
 
 void Server::broadcastRoomUsers(const ChatRoom& room)
 {
+    const auto& roomName = room.getChatRoomName();
+    auto members = roomSockets.find(roomName);
+    if (members == roomSockets.end()) return;
     const auto users = room.getConnectedUsers();
-
-    std::string frame = "PROT5\nUSERS\n";
-    frame += room.getChatRoomName() + "\n";
-    frame += std::to_string(users.size()) + "\n";
-
-    for (const auto& user : users)
-        frame += user + "\n";
-
-    std::string encrypted =
-        FreiaEncryption::encryptData(frame, serverKey);
-
-    if (encrypted.empty()) return;
-
-    // Send only to users in this room
-    for (const auto& [fd, username] : socketToUsername)
-    {
-        if (std::find(users.begin(), users.end(), username) != users.end())
-            sendWithLengthPrefix(fd, encrypted);
-        
-    }
+    std::string frame = "PROT5\nUSERS\n" + roomName + "\n" + std::to_string(users.size());
+    for (const auto& user : users) frame += "\n" + user;
+    std::string encrypted = FreiaEncryption::encryptData(frame, serverKey);
+    for (int fd : members->second)
+        if (!encrypted.empty()) sendWithLengthPrefix(fd, encrypted);
 }

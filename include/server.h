@@ -16,6 +16,8 @@
 #include <unordered_map>
 #include "AccountDatabase.h"
 #include "ChatRoom.h"
+#include "RoomDatabase.h"
+#include <unordered_set>
 #include <algorithm>
 
 class Server
@@ -42,7 +44,15 @@ private:
     void sendSuccess(int sock, const std::string& msg);
     void sendError(int sock, const std::string& reason);
     void processProt5(int clientIndex, const std::string& plaintext);
-    void sendRoom(int clientIndex, ChatRoom room);
+    void sendRoom(int socket, const ChatRoom& room);
+    void sendProt5Error(int socket, const std::string& room, const std::string& reason);
+    void joinRoom(int socket, const std::string& name, const std::string& username,
+                  const std::string& authTokenBase64);
+    void leaveRoom(int socket, const std::string& name);
+    void refreshRoomUsers(const std::string& name);
+    static bool validProtocolName(const std::string& s, size_t maxSize);
+    static bool validBase64(const std::string& s, size_t maxSize);
+    bool sendEncrypted(int socket, const std::string& frame);
 
     // ====================================
     // Client activity
@@ -71,18 +81,19 @@ private:
     fd_set readfds;
     int addrlen = 0;
     sockaddr_in address{};
-    static constexpr int MAX_PACKET_SIZE = 1024;
+    static constexpr int MAX_PACKET_SIZE = 64 * 1024;
     char buffer[MAX_PACKET_SIZE];
     int masterSocket = -1;
 
     std::unordered_map<int, std::string> socketToUsername;
-    std::vector<std::string> onlineRooms;
     std::vector<ChatRoom> roomsWithConnections;
-    std::vector<ChatRoom> fakeDatabaseRooms;
+    std::unordered_map<std::string, std::unordered_set<int>> roomSockets;
+    std::unordered_map<int, std::string> handshakeUsernames;
 
     std::mutex socketMutex;
 
     AccountDatabase accountsDb;
+    RoomDatabase roomsDb;
 
 
 

@@ -1,6 +1,36 @@
 # Changelog
 All notable changes to **Freia Thiwi** will be documented here.
 
+## [0.6.0] - 2026-11-25
+### Added
+- `PROT5` chatroom support: create, join, leave, and room-specific encrypted message relay.
+- Automatic room join for the creator, and `PROT5 ROOM` replies on both first and repeat joins.
+- Live room-user snapshots (`PROT5 USERS`) broadcast when participants join, leave, or disconnect.
+- SQLite `rooms`, `room_members`, and `room_messages` tables in the existing `accounts.db`.
+- Persistent room metadata, creator/creation time, recorded membership, and encrypted message history (up to 100 recent messages replayed on join).
+- Server-side room-password checks using a salted PBKDF2-HMAC-SHA256 verifier of a separate room-login token.
+- Persistent room-name list sent to authenticated clients.
+
+### Changed
+- Account authentication through `PROT4` is now required before access to chatroom operations.
+- Room messages are delivered only to sockets joined to the target room; the server stores encrypted, Base64-encoded message bodies, not their plaintext.
+- Room-user presence is derived from active socket membership; SQLite is used for persistent data rather than an online-state cache.
+- Transport packet limit increased to 64 KiB, with complete send loops and improved framing checks.
+
+### Fixed
+- Repeat joins previously returned a success notice but could omit the required room data.
+- Live member changes no longer disappear when `ChatRoom` objects are copied out of the vector.
+- Disconnect cleanup refreshes online room-user lists.
+- Incorrect packet-length diagnostic string construction and Base64 decoding issues.
+
+### Notes
+- Room credentials and `PROT5` wire behavior changed: upgrade server and client together for v0.6.0.
+- Historical in-memory rooms cannot be recovered if they were never saved before this release.
+- AES-256-CBC is still unauthenticated; v0.6.0 is a development release, not a security audit or final secure-messaging milestone.
+
+---
+
+
 ## [0.5.0] - 2026-02-13
 ### Added
 - Proper Embedded Database has been added for accounts 

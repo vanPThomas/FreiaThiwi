@@ -61,7 +61,7 @@ bool AccountDatabase::createAccount(const std::string& username, const std::stri
     sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, keyBase64.c_str(), -1, SQLITE_TRANSIENT);
 
-    bool success = (sqlite3_step(stmt) == SQLITE_DONE);
+    bool success = (sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) == 1);
     sqlite3_finalize(stmt);
 
     return success;

@@ -23,6 +23,8 @@ public:
     void addMessage(std::string message);
     void addConnectedUser(std::string user);
     void removeConnectedUser(const std::string& user);
+    void setConnectedUsers(std::vector<std::string> users);
+    void setMetadata(std::string creator, std::string creationTime);
 
 private:
     std::string chatRoomName;

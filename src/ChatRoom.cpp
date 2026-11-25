@@ -32,3 +32,13 @@ void ChatRoom::removeConnectedUser(const std::string& user)
         std::remove(connectedUsers.begin(), connectedUsers.end(), user),
         connectedUsers.end());
 }
+void ChatRoom::setConnectedUsers(std::vector<std::string> users)
+{
+    connectedUsers = std::move(users);
+}
+
+void ChatRoom::setMetadata(std::string creator, std::string creationTime)
+{
+    roomCreator = std::move(creator);
+    roomCreationTime = std::move(creationTime);
+}

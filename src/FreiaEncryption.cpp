@@ -27,21 +27,33 @@ std::string FreiaEncryption::base64_encode(const std::string& in)
 
 std::string FreiaEncryption::base64_decode(const std::string& in)
 {
-    std::vector<unsigned char> out;
-    size_t i = 0;
-    while (i < in.size()) {
-        unsigned char a = (in[i] == '=') ? 0 : (strchr(b64.c_str(), in[i]) - b64.c_str());
-        unsigned char b = (i + 1 < in.size() && in[i + 1] != '=') ? (strchr(b64.c_str(), in[i + 1]) - b64.c_str()) : 0;
-        unsigned char c = (i + 2 < in.size() && in[i + 2] != '=') ? (strchr(b64.c_str(), in[i + 2]) - b64.c_str()) : 0;
-        unsigned char d = (i + 3 < in.size() && in[i + 3] != '=') ? (strchr(b64.c_str(), in[i + 3]) - b64.c_str()) : 0;
-
-        out.push_back((a << 2) | (b >> 4));
-        if (i + 1 < in.size() && in[i + 1] != '=') out.push_back((b << 4) | (c >> 2));
-        if (i + 2 < in.size() && in[i + 2] != '=') out.push_back((c << 6) | d);
-
-        i += 4;
+    if (in.empty() || in.size() % 4 != 0) return {};
+    std::string out;
+    out.reserve(in.size() / 4 * 3);
+    const auto decode = [](char c) -> int {
+        if (c >= 'A' && c <= 'Z') return c - 'A';
+        if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+        if (c >= '0' && c <= '9') return c - '0' + 52;
+        if (c == '+') return 62;
+        if (c == '/') return 63;
+        return -1;
+    };
+    for (size_t i = 0; i < in.size(); i += 4) {
+        const int a = decode(in[i]);
+        const int b = decode(in[i + 1]);
+        const int c = in[i + 2] == '=' ? 0 : decode(in[i + 2]);
+        const int d = in[i + 3] == '=' ? 0 : decode(in[i + 3]);
+        if (a < 0 || b < 0 || c < 0 || d < 0 ||
+            (in[i + 2] == '=' && in[i + 3] != '=') ||
+            ((in[i + 2] == '=' || in[i + 3] == '=') && i + 4 != in.size()))
+            return {};
+        out.push_back(static_cast<char>((a << 2) | (b >> 4)));
+        if (in[i + 2] != '=')
+            out.push_back(static_cast<char>((b << 4) | (c >> 2)));
+        if (in[i + 3] != '=')
+            out.push_back(static_cast<char>((c << 6) | d));
     }
-    return std::string(out.begin(), out.end());
+    return out;
 }
 
 std::string FreiaEncryption::encryptData(const std::string& data, const Key& key) {

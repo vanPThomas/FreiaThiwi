@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(FreiaThiwi VERSION 0.5.0 LANGUAGES CXX)
+project(FreiaThiwi VERSION 0.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -7,7 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Version macro for source code
 set(PROJECT_VERSION_MAJOR 0)
-set(PROJECT_VERSION_MINOR 5)
+set(PROJECT_VERSION_MINOR 6)
 set(PROJECT_VERSION_PATCH 0)
 set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
 add_compile_definitions(PROJECT_VERSION="${PROJECT_VERSION}")
@@ -19,6 +19,7 @@ add_executable(freia-thiwi
     src/server.cpp
     src/AccountDatabase.cpp
     src/ChatRoom.cpp
+    src/RoomDatabase.cpp
 )
 
 target_include_directories(freia-thiwi PRIVATE include)

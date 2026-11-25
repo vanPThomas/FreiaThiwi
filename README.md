@@ -1,6 +1,6 @@
 # 𐍆𐍂𐌴𐌹𐌰 𐌸𐌹𐍅𐌹 — Freia Thiwi Server
 
-**freia thiwi — “servant of freedom”**  
+**freia thiwi — “servant of freedom”**
 **Version: 0.6.0 (development release)**
 
 The lightweight C++17 TCP server for **Freia Thiwi**, a self-hosted encrypted messaging project. It relays the main chat, authenticates accounts, and manages persistent password-protected chatrooms without decrypting their message bodies.

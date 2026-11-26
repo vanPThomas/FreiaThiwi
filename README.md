@@ -20,6 +20,92 @@ Freia Thiwi is built with privacy, modest hardware requirements, and hands-on sy
 
 This release completes the initial **`PROT5` chatroom workflow** (creation, joining, messaging, live member lists, leaving, and SQLite persistence). Server and client **v0.6.0 should be upgraded together**: the room protocol changed from previous development versions.
 
+## Real hardware benchmark — Hazuki (2009)
+
+Freia Thiwi is designed to make self-hosted messaging practical on modest hardware. This benchmark records the actual resource use of the full server release, not a reduced test build.
+
+> **154 KiB server executable · 0.10% average server CPU during manual messaging · less than 10 MiB resident memory.**
+
+On **26 November 2026**, the unmodified server release `v0.6.0` (commit `c1959c5`) was compiled natively and tested on Hazuki, a 2009 Dell Inspiron 1545. Two external clients authenticated, joined the same newly created password-protected room, and exchanged encrypted messages using the normal server and SQLite implementation. No compatibility patches or reduced-feature build were used.
+
+### Test hardware and software
+
+| Component | Configuration |
+|---|---|
+| System | Dell Inspiron 1545 (2009; 17 years old at test time), BIOS A07 (2009-05-13) |
+| CPU | Intel Celeron 900 (Penryn), 2.20 GHz maximum, 1 core / 1 thread, x86-64 |
+| CPU cache | 32 KiB L1 instruction + 32 KiB L1 data, 1 MiB L2 |
+| Instruction support | No AES-NI or AVX; AES is executed without dedicated AES hardware instructions |
+| RAM | 4 GB DDR2-800 (2 × 2 GB); 3.8 GiB usable, 2 GiB swap configured |
+| Storage | Hitachi HTS54503-series mechanical SATA HDD, 320 GB nominal (298.1 GiB reported) |
+| OS / kernel | Ubuntu 24.04.5 LTS; Linux `6.8.0-139-generic` |
+| Build tools | GCC/G++ 13.3.0; CMake 3.28.3; Release build, `-j1` |
+| Libraries | OpenSSL 3.0.13; SQLite 3.45.1 |
+| Server executable | 154 KiB (rounded `ls -lh` output); 64-bit ELF PIE, dynamically linked, not stripped |
+
+The machine had about 538 MiB of system memory in use before server startup, 3.3 GiB available, and no swap in use. The executable size does not include dynamically linked libraries or the database.
+
+### Server memory and CPU measurements
+
+| Workload | RSS | PSS | Private memory (USS) | CPU usage |
+|---|---:|---:|---:|---|
+| Idle, no clients | 9,240 KiB (9.02 MiB) | 3,079 KiB (3.01 MiB) | 1,412 KiB (1.38 MiB) | 0.0% in 10 `top` samples |
+| Two authenticated clients | 9,708 KiB (9.48 MiB) | — | — | 0.0% lifetime average (`ps`) |
+| One room, two clients, after exchanging messages | 9,712 KiB (9.48 MiB) | 3,264 KiB (3.19 MiB) | 1,564 KiB (1.53 MiB) | 0.1% lifetime average (`ps`) |
+| 20-second manual busy-traffic test, two clients | 9,600 KiB (9.38 MiB) | — | — | **0.10% average; 1.00% highest one-second sample** (`pidstat`) |
+
+The first three stages reported one server thread. Process swap was zero in both `smaps_rollup` snapshots. Between the idle and post-messaging snapshots, RSS increased by only 472 KiB, PSS by 185 KiB and private memory by 152 KiB. RSS includes shared library pages; PSS apportions shared pages across processes, and USS here is the sum of `Private_Clean` and `Private_Dirty`. A dash indicates a metric not measured at that stage.
+
+### 20-second manual messaging test
+
+Two authenticated clients exchanged repeated encrypted messages in the same room while the server process was sampled once per second (`pidstat -u -r -d -p <PID> 1 20`). The server processes transport encryption, room-specific delivery and SQLite writes of encrypted room-message bodies; room-content encryption and decryption take place on the clients.
+
+| Metric | Observed result |
+|---|---:|
+| Average CPU (userspace + kernel) | **0.10%** (0.05% + 0.05%) |
+| Highest one-second CPU sample | 1.00% |
+| CPU samples reported as 0.00% | 18 of 20 |
+| CPU scheduling wait | 0.00% average |
+| RSS (minimum / maximum / average) | 9,600 / 9,600 / 9,600 KiB |
+| Observed RSS growth | 0 KiB |
+| Virtual memory (VSZ) | 13,832 KiB throughout |
+| Minor / major page faults | 0.10 / 0.00 per second on average |
+| Average process-attributed disk writes | 17.99 KiB/s |
+| Highest one-second disk-write sample | 48 KiB/s |
+| Approximate process-attributed writes | 360 KiB over the test |
+| Process-attributed disk reads | 0 KiB/s |
+| Reported process I/O delay | 0 (as reported by `pidstat`) |
+
+### Reproducing the benchmark
+
+Build the server from the release tag on Linux, using its normal dependencies:
+
+```bash
+git checkout v0.6.0
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j1
+cd bin
+./freia-thiwi
+```
+
+With one server instance running, use a separate terminal on the server host:
+
+```bash
+pid=$(pgrep -x freia-thiwi)
+ps -p "$pid" -o pid,pcpu,pmem,rss,vsz,nlwp,etime
+cat "/proc/$pid/smaps_rollup"
+top -b -d 1 -n 10 -p "$pid"
+pidstat -u -r -d -p "$pid" 1 20
+```
+
+`pidstat` is provided by the `sysstat` package. Use a dedicated test database and test accounts. Record the idle baseline first, then connect two clients from another machine, authenticate both, create/join a room, and exchange messages during the 20-second sampling window.
+
+### Scope and next steps
+
+These are measured **server-side** results for one machine and a two-client manual workload, not minimum system requirements, peak instantaneous CPU usage, or a maximum-capacity benchmark. The message count, message sizes, delivery latency and exact traffic rate were not recorded. The 20-second test does not establish long-term memory stability, storage latency or security. The graphical client's own CPU/RAM usage on Hazuki was not measured.
+
+A reproducible automated stress test with controlled message rates, more concurrent clients, multiple rooms, reconnects and longer runs is planned. A 32-bit machine from around 2000 (Celeron-chan, 651 MHz, 384 MB RAM) is also planned as an experimental compatibility target; it has **not yet** run Freia Thiwi.
+
 ## How the system works
 
 Three independent passwords have different roles:
@@ -149,10 +235,6 @@ Avoid using Freia Thiwi to protect high-risk communications until these security
 - Potential file sharing and further messaging features.
 
 The goal is a **small, useful, maintainable messenger**, not an endlessly expanding list of prerequisites for 1.0.
-
-## Performance note
-
-An earlier development build was tested with two local-area-network clients on a Dell Inspiron 1545 (Intel Celeron 900, 2 GB RAM, Ubuntu Server). The project aims to remain usable on old hardware. That historical observation is **not** a v0.6.0 load test, a hardware compatibility guarantee, or a security assessment.
 
 ## Project name and purpose
 
